@@ -3,108 +3,172 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ChildClimate Risk Atlas</title>
+  <title>ChildClimate Risk Atlas — Trameter</title>
   <meta name="description" content="Facility-level climate & health vulnerability scores for schools and clinics, anywhere in the world. A Trameter open-source project." />
   <meta name="google" content="notranslate" />
+  <link rel="icon" type="image/svg+xml" href="./assets/logo-mark-reverse.svg" />
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
   <link rel="stylesheet" href="./assets/style.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌍</text></svg>" />
 </head>
 <body>
 
-  <aside id="sidebar">
-    <!-- header -->
-    <div class="header">
-      <div class="brand">
-        <div class="logo">CA</div>
-        <div>
-          <h1>ChildClimate Risk Atlas</h1>
-          <p class="tagline">Facility-level climate vulnerability scores for children.</p>
+  <!-- ============ TOP BAR ============ -->
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="ChildClimate Atlas home">
+      <svg class="logo-mark" width="28" height="28" viewBox="0 0 76 76" aria-hidden="true">
+        <circle cx="38" cy="38" r="34" fill="none" stroke="currentColor" stroke-width="2.5"/>
+        <circle cx="38" cy="22" r="5.5" fill="var(--ember)"/>
+      </svg>
+      <span class="wm"><b>ChildClimate</b> <span>Atlas</span></span>
+    </a>
+    <nav class="nav" aria-label="Primary">
+      <a href="/" class="active">Atlas</a>
+      <a href="#about" id="nav-about">About</a>
+    </nav>
+    <div class="right">
+      <span class="chip" id="facility-chip"><span class="dot"></span><span id="facility-chip-text">v0.1 · 19,415 facilities</span></span>
+      <a class="btn" href="https://github.com/Trameter/childclimate-atlas" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </header>
+
+  <!-- ============ SHELL (3-col grid, right column collapsed by default) ============ -->
+  <div class="shell">
+
+    <!-- ===== LEFT ===== -->
+    <aside class="side">
+      <div class="scroll">
+
+        <!-- Hero -->
+        <div class="pane hero-pane">
+          <div class="eyebrow"><span class="mono">Trameter · Nigeria · MIT</span></div>
+          <h1>Which clinic should we <em>harden first?</em></h1>
+          <p>A 0–100 climate-risk score for every school and clinic in a country. Built on open data, published under MIT, auditable to source.</p>
+          <div class="hero-stats">
+            <div class="hstat"><span class="v">19,415</span><span class="l">Facilities</span></div>
+            <div class="hstat"><span class="v">3</span><span class="l">Countries</span></div>
+            <div class="hstat"><span class="v">6</span><span class="l">Sub-scores</span></div>
+          </div>
         </div>
+
+        <!-- Search -->
+        <div class="pane">
+          <h3>Find a facility</h3>
+          <div class="search">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="opacity:0.55"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input type="text" id="search" placeholder="Search all facilities…" autocomplete="off" />
+            <span class="kbd" aria-hidden="true">/</span>
+          </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="pane">
+          <h3>Filters</h3>
+
+          <div class="field">
+            <label for="country">Country</label>
+            <div class="select">
+              <select id="country">
+                <option value="NGA">🇳🇬 Nigeria</option>
+                <option value="BGD">🇧🇩 Bangladesh</option>
+                <option value="GTM">🇬🇹 Guatemala</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field" id="state-wrap">
+            <label>State / Region</label>
+            <div class="select">
+              <button type="button" id="state-btn" class="state-btn">All states / regions</button>
+              <div id="state-panel" class="state-panel"></div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Facility type</label>
+            <div class="pills">
+              <button class="chip pill active" data-type="clinic"><span class="c"></span>Clinics</button>
+              <button class="chip pill active" data-type="hospital"><span class="c"></span>Hospitals</button>
+              <button class="chip pill active" data-type="school"><span class="c"></span>Schools</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Risk band</label>
+            <div class="pills pills-4">
+              <button class="chip pill active" data-band="low"><span class="c" style="background:var(--low)"></span>Low</button>
+              <button class="chip pill active" data-band="mid"><span class="c" style="background:var(--mod)"></span>Mod</button>
+              <button class="chip pill active" data-band="high"><span class="c" style="background:var(--high)"></span>High</button>
+              <button class="chip pill active" data-band="severe"><span class="c" style="background:var(--sev)"></span>Severe</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- At-a-glance stats for current filters -->
+        <div class="pane">
+          <h3>Current view</h3>
+          <div id="stats" class="stats"></div>
+          <div id="dist"></div>
+        </div>
+
+        <!-- Risk legend -->
+        <div class="pane">
+          <h3>Risk band <span class="k">0–100</span></h3>
+          <div class="legend">
+            <div class="band"><span class="sw" style="background:var(--low)"></span><span class="n">Low</span><span class="r">0 – 29</span></div>
+            <div class="band"><span class="sw" style="background:var(--mod)"></span><span class="n">Moderate</span><span class="r">30 – 54</span></div>
+            <div class="band"><span class="sw" style="background:var(--high)"></span><span class="n">High</span><span class="r">55 – 74</span></div>
+            <div class="band"><span class="sw" style="background:var(--sev)"></span><span class="n">Severe</span><span class="r">75 – 100</span></div>
+          </div>
+        </div>
+
+        <!-- Most critical list -->
+        <div class="pane">
+          <h3>Most critical <span class="k" id="top-list-kicker">top 6</span></h3>
+          <div id="top-list" class="critical"></div>
+        </div>
+
+        <!-- Exports -->
+        <div class="pane" style="border-bottom:0">
+          <h3>Export view</h3>
+          <div class="actions">
+            <button class="act" id="btn-heatmap" title="Toggle risk heatmap overlay">Heatmap</button>
+            <button class="act" id="btn-csv" title="Download CSV of current filtered view">CSV</button>
+            <button class="act" id="btn-geojson" title="Download full country GeoJSON">GeoJSON</button>
+            <button class="act" id="btn-print" title="Open print-ready report">PDF report</button>
+          </div>
+        </div>
+
       </div>
-    </div>
+    </aside>
 
-    <!-- search bar (top) -->
-    <div class="search-bar">
-      <label for="search">Find a specific facility</label>
-      <input type="text" id="search" placeholder="Search all facilities…" />
-    </div>
+    <!-- ===== CENTER MAP ===== -->
+    <main class="map-wrap">
+      <div id="map"></div>
 
-    <!-- controls: country + state -->
-    <div class="controls">
-      <div class="control-group">
-        <label for="country">Country</label>
-        <select id="country">
-          <option value="NGA">🇳🇬 Nigeria</option>
-          <option value="BGD">🇧🇩 Bangladesh</option>
-          <option value="GTM">🇬🇹 Guatemala</option>
-        </select>
+      <!-- Map HUD -->
+      <div class="map-hud-tl">
+        <div class="hud mono" id="hud-country">Nigeria · — facilities</div>
+        <div class="hud mono" id="hud-heatmap">Heatmap · off</div>
       </div>
-      <div class="control-group" id="state-wrap" style="position:relative">
-        <label>State / Region</label>
-        <button type="button" id="state-btn" class="state-btn">All States / Regions</button>
-        <div id="state-panel" class="state-panel"></div>
+      <div class="map-hud-bl">
+        <div class="hud mono">© OSM · ERA5 · CAMS</div>
       </div>
-    </div>
+    </main>
 
-    <!-- filter chips -->
-    <div class="filters">
-      <button class="chip active" data-type="clinic"><span class="dot" style="background:#4fb3ff"></span>Clinics</button>
-      <button class="chip active" data-type="hospital"><span class="dot" style="background:#7c3aed"></span>Hospitals</button>
-      <button class="chip active" data-type="school"><span class="dot" style="background:#f97316"></span>Schools</button>
-      <span style="width:1px;background:var(--border-2);margin:0 2px"></span>
-      <button class="chip active" data-band="low"><span class="dot" style="background:#2ecc71"></span>Low</button>
-      <button class="chip active" data-band="mid"><span class="dot" style="background:#f1c40f"></span>Mod</button>
-      <button class="chip active" data-band="high"><span class="dot" style="background:#f0932b"></span>High</button>
-      <button class="chip active" data-band="severe"><span class="dot" style="background:#ff3333"></span>Severe</button>
-    </div>
+    <!-- ===== RIGHT (FACILITY DETAIL) — collapsed until a facility is clicked ===== -->
+    <aside class="side side-r detail-wrap" aria-hidden="true">
+      <button type="button" class="detail-close" id="btn-close-detail" aria-label="Close facility detail">×</button>
+      <div id="detail" class="detail scroll"></div>
+    </aside>
 
-    <!-- scrollable body -->
-    <div class="sidebar-scroll">
-      <!-- stats -->
-      <div id="stats" class="stats"></div>
-
-      <!-- distribution bar -->
-      <div id="dist"></div>
-
-      <!-- export -->
-      <div class="export-bar">
-        <button class="btn" id="btn-heatmap">&#128293; Heatmap</button>
-        <button class="btn" id="btn-csv">&#128196; CSV</button>
-        <button class="btn" id="btn-geojson">&#127758; GeoJSON</button>
-        <button class="btn" id="btn-print">&#128424; Report</button>
-      </div>
-
-      <!-- detail panel -->
-      <div id="detail" class="detail empty">
-        <span class="icon">🌍</span>
-        Click a facility on the map to see its full risk profile and recommended actions.
-      </div>
-
-      <!-- top list -->
-      <div id="top-list" class="top-list"></div>
-    </div>
-
-    <!-- footer -->
-    <div class="footer">
-      <p>Data: OSM, Open-Meteo, Copernicus CAMS, WHO, WorldPop</p>
-      <p>
-        <a href="https://github.com/Trameter/childclimate-atlas" target="_blank" rel="noopener">Open source &middot; MIT</a>
-      </p>
-      <p style="margin-top:4px">&copy; 2026 Trameter Nigeria Ltd</p>
-    </div>
-  </aside>
-
-  <div id="map">
-    <!-- map legend -->
-    <div class="map-legend">
-      <h4>Child Climate Risk Score</h4>
-      <div class="row"><div class="swatch" style="background:#2ecc71"></div> 0–29 Low</div>
-      <div class="row"><div class="swatch" style="background:#f1c40f"></div> 30–54 Moderate</div>
-      <div class="row"><div class="swatch" style="background:#f0932b"></div> 55–74 High</div>
-      <div class="row"><div class="swatch" style="background:#ff3333"></div> 75–100 Severe</div>
-    </div>
   </div>
+
+  <!-- ============ FOOTER ============ -->
+  <footer>
+    <span>© 2026 Trameter Nigeria Ltd · CAC registered · Lagos</span>
+    <span class="mono">Data · OSM · Open-Meteo/ERA5 · Copernicus CAMS · WorldPop · WHO</span>
+    <span><a href="https://github.com/Trameter/childclimate-atlas" target="_blank" rel="noopener">MIT · open source</a></span>
+  </footer>
 
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="./assets/app.js"></script>

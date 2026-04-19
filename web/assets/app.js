@@ -8,11 +8,25 @@ const VIEWS = {
 };
 
 // ---- helpers ----
+// Risk-band colours match the CSS design-system tokens exactly:
+//   low #6FA774 · mod #D9B653 · high #D9894F · severe #C35248
 function band(s) { return s < 30 ? "low" : s < 55 ? "mid" : s < 75 ? "high" : "severe"; }
 function bandLabel(s) { return s < 30 ? "Low" : s < 55 ? "Moderate" : s < 75 ? "High" : "Severe"; }
 function bandColor(s) {
-  const m = { low: "#2ecc71", mid: "#f1c40f", high: "#f0932b", severe: "#ff3333" };
+  const m = { low: "#6FA774", mid: "#D9B653", high: "#D9894F", severe: "#C35248" };
   return m[band(s)];
+}
+// human-readable label for sub-score keys
+function prettyKey(k) {
+  const M = {
+    heat_exposure: "Heat exposure",
+    air_pollution: "Air pollution",
+    flood_risk: "Flood risk",
+    drought_risk: "Drought risk",
+    child_density: "Child-population density",
+    facility_fragility: "Facility fragility",
+  };
+  return M[k] || k.replace(/_/g, " ");
 }
 function typeIcon(t) { return t === "hospital" ? "\u{1F3E5}" : t === "clinic" ? "\u{1FA7A}" : "\u{1F3EB}"; }
 function displayName(f) {
@@ -150,7 +164,7 @@ function populateStates(features) {
   const allOpt = document.createElement("div");
   allOpt.className = "state-opt sel";
   allOpt.dataset.value = "";
-  allOpt.innerHTML = 'All States / Regions';
+  allOpt.innerHTML = 'All states / regions';
   panel.appendChild(allOpt);
 
   states.forEach(([s, c]) => {
@@ -167,7 +181,7 @@ function populateStates(features) {
       e.stopPropagation();
       const val = opt.dataset.value;
       activeFilters.state = val;
-      document.getElementById("state-btn").textContent = val || "All States / Regions";
+      document.getElementById("state-btn").textContent = val || "All states / regions";
       panel.querySelectorAll(".state-opt").forEach(o => o.classList.remove("sel"));
       opt.classList.add("sel");
       panel.classList.remove("open");
@@ -253,34 +267,40 @@ function updateMap() {
 
   const src = map.getSource("facilities");
   if (src) { src.setData(geojson); return; }
+
+  // Risk-band colour stops shared by all three layers (glow, dot, selection ring)
+  const RISK_STOPS = ["step", ["get", "risk_score"],
+    "#6FA774",  // low
+    30, "#D9B653",  // moderate
+    55, "#D9894F",  // high
+    75, "#C35248"]; // severe
+
   map.addSource("facilities", { type: "geojson", data: geojson });
   map.addLayer({
     id: "facilities-glow", type: "circle", source: "facilities",
     paint: {
       "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 6, 10, 12, 14, 18],
-      "circle-color": ["step", ["get", "risk_score"], "#2ecc71", 30, "#f1c40f", 55, "#f0932b", 75, "#ff3333"],
-      "circle-blur": 0.8, "circle-opacity": 0.35,
+      "circle-color": RISK_STOPS,
+      "circle-blur": 0.8, "circle-opacity": 0.32,
     },
   });
   map.addLayer({
     id: "facilities", type: "circle", source: "facilities",
     paint: {
       "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 3, 10, 6, 14, 10],
-      "circle-color": ["step", ["get", "risk_score"], "#2ecc71", 30, "#f1c40f", 55, "#f0932b", 75, "#ff3333"],
-      "circle-stroke-color": "rgba(10,15,30,0.7)", "circle-stroke-width": 1.2,
+      "circle-color": RISK_STOPS,
+      "circle-stroke-color": "rgba(30,36,51,0.85)",  // var(--ink) at 85%
+      "circle-stroke-width": 1.2,
     },
   });
-  // Selected facility highlight — single ring, same color palette as the dots
+  // Selected facility highlight — single ring, same palette as the dots
   map.addSource("selected", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({
     id: "selected-ring", type: "circle", source: "selected",
     paint: {
       "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 12, 10, 18, 14, 24],
       "circle-color": "rgba(0,0,0,0)",
-      "circle-stroke-color": [
-        "step", ["get", "risk_score"],
-        "#2ecc71", 30, "#f1c40f", 55, "#f0932b", 75, "#ff3333"
-      ],
+      "circle-stroke-color": RISK_STOPS,
       "circle-stroke-width": 3,
     },
   });
@@ -318,8 +338,8 @@ function renderStats() {
   const hospitals = filteredFeatures.filter(f => f.properties.facility_type === "hospital").length;
 
   document.getElementById("stats").innerHTML = `
-    <div class="stat"><div class="label">Total</div><div class="value">${n}</div></div>
-    <div class="stat"><div class="label">Avg Risk</div><div class="value ${band(avg)}">${avg}</div></div>
+    <div class="stat"><div class="label">Total</div><div class="value">${n.toLocaleString()}</div></div>
+    <div class="stat"><div class="label">Avg</div><div class="value ${band(avg)}">${avg}</div></div>
     <div class="stat"><div class="label">High</div><div class="value high">${high}</div></div>
     <div class="stat"><div class="label">Severe</div><div class="value severe">${severe}</div></div>
   `;
@@ -329,17 +349,28 @@ function renderStats() {
   document.getElementById("dist").innerHTML = `
     <div class="dist-bar">
       <div class="seg" style="width:${pcts.low}%;background:var(--low)"></div>
-      <div class="seg" style="width:${pcts.mid}%;background:var(--mid)"></div>
+      <div class="seg" style="width:${pcts.mid}%;background:var(--mod)"></div>
       <div class="seg" style="width:${pcts.high}%;background:var(--high)"></div>
-      <div class="seg" style="width:${pcts.severe}%;background:var(--severe)"></div>
+      <div class="seg" style="width:${pcts.severe}%;background:var(--sev)"></div>
     </div>
     <div class="dist-legend">
       <span>${low} low</span><span>${mid} mod</span><span>${high} high</span><span>${severe} severe</span>
     </div>
-    <div style="font-size:10px;color:var(--muted);margin-top:8px">
-      ${typeIcon("hospital")} ${hospitals} hospitals &nbsp; ${typeIcon("clinic")} ${clinics} clinics &nbsp; ${typeIcon("school")} ${schools} schools
-    </div>
   `;
+
+  // update top-bar facility chip with filtered count
+  const chipText = document.getElementById("facility-chip-text");
+  if (chipText) {
+    const cname = currentData?.metadata?.country || "";
+    chipText.textContent = `${cname} · ${n.toLocaleString()} facilities`;
+  }
+
+  // update map HUD country line
+  const hudC = document.getElementById("hud-country");
+  if (hudC) {
+    const cname = currentData?.metadata?.country || "—";
+    hudC.textContent = `${cname} · ${n.toLocaleString()} facilities`;
+  }
 }
 
 // ---- highlight selected facility ----
@@ -357,6 +388,65 @@ function highlightFacility(feature) {
 }
 
 // ---- sidebar: detail panel ----
+// Build a human-readable "top drivers" list from the risk components + underlying inputs.
+function computeDrivers(comps, weights, climate, air) {
+  const contribs = Object.keys(weights)
+    .map(k => ({
+      key: k,
+      weight: weights[k] || 0,
+      sub: comps[k] || 0,
+      points: (100 * (weights[k] || 0) * (comps[k] || 0))
+    }))
+    .sort((a, b) => b.points - a.points)
+    .slice(0, 3);
+
+  return contribs.map(c => {
+    const k = c.key;
+    if (k === "heat_exposure") {
+      const d = climate.heat_index_days;
+      return {
+        title: d != null ? `${d} days above 35°C apparent temperature in 2024` : "Heat exposure is a top contributor",
+        desc: "Heat-stress days drive cooling demand, outdoor-work risk, and pediatric vulnerability in this catchment.",
+      };
+    }
+    if (k === "air_pollution") {
+      const p = air.pm25_avg_ugm3;
+      const mult = p != null ? (p / 5).toFixed(1) : null; // WHO 2021 annual guideline = 5 µg/m³
+      return {
+        title: p != null ? `PM2.5 averaged ${p} µg/m³ over the last 30 days` : "Air pollution is a top contributor",
+        desc: mult ? `${mult}× the WHO 2021 annual guideline (5 µg/m³). Respiratory presentations, especially in children, climb with sustained exposure.` : "PM2.5 and NO₂ averages exceed WHO thresholds.",
+      };
+    }
+    if (k === "flood_risk") {
+      const d = climate.heavy_precip_days;
+      return {
+        title: d != null ? `${d} heavy-precipitation days (≥50 mm) per year` : "Flood risk is a top contributor",
+        desc: "Heavy-precip days serve as a flash-flood proxy at this prototype stage; upgrades planned against JRC global flood maps.",
+      };
+    }
+    if (k === "drought_risk") {
+      const d = climate.longest_dry_run_days;
+      return {
+        title: d != null ? `Longest dry streak: ${d} consecutive days under 1 mm precip` : "Drought risk is a top contributor",
+        desc: "Extended dry runs stress water supply and sanitation infrastructure, amplifying disease-transmission risk.",
+      };
+    }
+    if (k === "child_density") {
+      return {
+        title: "High child-population catchment density",
+        desc: "The child-population multiplier is at or near maximum for this country — disruption here cascades across many dependents.",
+      };
+    }
+    if (k === "facility_fragility") {
+      return {
+        title: "Structural fragility elevated",
+        desc: "OSM-derived fragility heuristic suggests this facility has limited backup power / water redundancy. v0.2 will swap this for WHO SARA audit data.",
+      };
+    }
+    return { title: prettyKey(k), desc: "Contributes meaningfully to the composite risk score." };
+  });
+}
+
 function renderDetail(feature) {
   const p = feature.properties;
   const s = p.risk_score;
@@ -366,93 +456,180 @@ function renderDetail(feature) {
   const climate = typeof p.climate === "string" ? JSON.parse(p.climate) : (p.climate || {});
   const air = typeof p.air === "string" ? JSON.parse(p.air) : (p.air || {});
   const recs = typeof p.recommendations === "string" ? JSON.parse(p.recommendations) : (p.recommendations || []);
+  const tags = typeof p.tags === "string" ? JSON.parse(p.tags || "{}") : (p.tags || {});
   const coords = feature.geometry.coordinates;
+  const stateName = getState(feature);
+  const country = currentData?.metadata?.country || "";
 
-  const barRows = Object.keys(weights).map(k => {
+  // Breakdown rows — each sub-score with its inline bar and points
+  const breakdown = Object.keys(weights).map(k => {
     const sub = comps[k] || 0;
-    const pts = (100 * (weights[k] || 0) * sub).toFixed(1);
-    return `<div class="bar-row">
-      <div class="name">${k.replace(/_/g, " ")}</div>
-      <div class="track"><div class="fill" style="width:${(sub*100).toFixed(0)}%;background:${bandColor(s)}"></div></div>
-      <div class="pts">${pts}</div>
+    const max = 100 * (weights[k] || 0);
+    const pts = max * sub;
+    const pct = Math.min(100, Math.max(0, sub * 100));
+    return `<div class="break-row">
+      <span class="n">${prettyKey(k)}</span>
+      <span class="b"><i style="width:${pct.toFixed(0)}%"></i></span>
+      <span class="p">${pts.toFixed(1)}&nbsp;/&nbsp;${max.toFixed(0)}</span>
     </div>`;
   }).join("");
 
-  const recHtml = recs.length ? recs.map(r => `
-    <div class="rec">
-      <div class="rec-head">
-        <span class="rec-cat">${r.category}</span>
-        <span class="rec-cost">\u2248 $${r.estimated_cost_usd}</span>
+  // Top drivers
+  const drivers = computeDrivers(comps, weights, climate, air);
+  const driversHtml = drivers.map((d, i) => `
+    <div class="driver">
+      <span class="idx">${String(i + 1).padStart(2, "0")}</span>
+      <div><div class="t">${d.title}</div><div class="d">${d.desc}</div></div>
+    </div>`).join("");
+
+  // Raw inputs table
+  const rawInputs = [
+    ["Heat-index days (≥35°C app. T)", climate.heat_index_days != null ? `${climate.heat_index_days} / yr` : "—"],
+    ["Heavy precip days (≥50 mm)", climate.heavy_precip_days != null ? `${climate.heavy_precip_days} / yr` : "—"],
+    ["Longest dry run", climate.longest_dry_run_days != null ? `${climate.longest_dry_run_days} d` : "—"],
+    ["PM2.5 · 30-day mean", air.pm25_avg_ugm3 != null ? `${air.pm25_avg_ugm3} µg/m³` : "—"],
+    ["NO₂ · 30-day mean", air.no2_avg_ugm3 != null ? `${air.no2_avg_ugm3} µg/m³` : "—"],
+    ["Hours PM2.5 > 15 µg/m³", air.pm25_exceed_hours_30d != null ? `${air.pm25_exceed_hours_30d} / 720` : "—"],
+  ];
+  const inputsHtml = rawInputs.map(([k, v]) => `
+    <div class="break-row compact">
+      <span class="n">${k}</span>
+      <span class="p">${v}</span>
+    </div>`).join("");
+
+  // Recommendations
+  const recHtml = recs.length ? recs.map((r, i) => `
+    <div class="rec-card">
+      <div class="top">
+        <span class="pri">Priority ${String(i + 1).padStart(2, "0")}${r.category ? " · " + r.category : ""}</span>
+        <span class="cost">$${r.estimated_cost_usd}</span>
       </div>
-      <div class="rec-title">${r.title}</div>
-      <div class="rec-desc">${r.description}</div>
-    </div>
-  `).join("") : '<div style="color:var(--muted);font-size:11px">No specific recommendations at this risk level.</div>';
+      <span class="t">${r.title}</span>
+      <span class="d">${r.description}</span>
+    </div>`).join("") : '<div style="color:var(--paper-mute);font-size:12px">No specific recommendations at this risk level.</div>';
 
-  document.getElementById("detail").className = "detail";
+  // Facility type + ID for kicker
+  const ftype = (p.facility_type || "facility").charAt(0).toUpperCase() + (p.facility_type || "facility").slice(1);
+  const osmId = p.id || "";
+
+  // Coord formatting: N/S, E/W
+  const latStr = `${Math.abs(coords[1]).toFixed(3)}° ${coords[1] >= 0 ? "N" : "S"}`;
+  const lonStr = `${Math.abs(coords[0]).toFixed(3)}° ${coords[0] >= 0 ? "E" : "W"}`;
+
+  // Rough "top 1.X%" based on rank within country — computed from allFeatures
+  const total = allFeatures.length;
+  const rank = allFeatures.filter(f => f.properties.risk_score > s).length + 1;
+  const pct = total ? ((rank / total) * 100) : 0;
+  const rankLine = total > 0
+    ? `Top ${pct.toFixed(1)}% of ${country} facilities by composite child-climate exposure.`
+    : "";
+
   document.getElementById("detail").innerHTML = `
-    <h2>${typeIcon(p.facility_type)} ${displayName(feature)}</h2>
-    <span class="ftype">${p.facility_type}</span>
-    <div class="coords">${coords[1].toFixed(4)}\u00b0N, ${coords[0].toFixed(4)}\u00b0E</div>
-    <div class="score-chip ${b}">
-      <span class="num">${s.toFixed(0)}</span>
-      <span class="lbl">${bandLabel(s)} Risk</span>
+    <div class="head">
+      <div class="kicker">
+        <span class="ftype">${ftype}${osmId ? " · ID " + osmId : ""}</span>
+        <span class="coords">${latStr} · ${lonStr}</span>
+      </div>
+      <h2>${displayName(feature)}</h2>
+      <div class="loc">${stateName && stateName !== "Untagged Region" ? stateName + ", " : ""}${country}</div>
+
+      <div class="score-block ${b}">
+        <div class="score-num">${s.toFixed(0)}</div>
+        <div class="score-meta">
+          <span class="score-band ${b}"><span class="ddot"></span>${bandLabel(s)}</span>
+          ${rankLine ? `<span class="sub">${rankLine}</span>` : ""}
+        </div>
+      </div>
+
+      <div class="gauge">
+        <div class="track">
+          <div class="fill" style="width:${Math.min(100, s).toFixed(1)}%"></div>
+          <div class="marker" style="left:${Math.min(100, s).toFixed(1)}%"></div>
+        </div>
+        <div class="ticks"><span>0</span><span>30</span><span>55</span><span>75</span><span>100</span></div>
+      </div>
     </div>
 
-    <div class="section-title">Risk Breakdown</div>
-    <div class="bars">${barRows}</div>
-
-    <div class="section-title">Climate &amp; Air Data</div>
-    <div class="data-grid">
-      <div class="item"><span class="k">Heat days</span><span class="v">${climate.heat_index_days ?? "\u2014"}/yr</span></div>
-      <div class="item"><span class="k">Flood days</span><span class="v">${climate.heavy_precip_days ?? "\u2014"}/yr</span></div>
-      <div class="item"><span class="k">Dry streak</span><span class="v">${climate.longest_dry_run_days ?? "\u2014"} days</span></div>
-      <div class="item"><span class="k">PM2.5</span><span class="v">${air.pm25_avg_ugm3 ?? "\u2014"} \u00b5g/m\u00b3</span></div>
-      <div class="item"><span class="k">NO\u2082</span><span class="v">${air.no2_avg_ugm3 ?? "\u2014"} \u00b5g/m\u00b3</span></div>
-      <div class="item"><span class="k">PM2.5 exceed</span><span class="v">${air.pm25_exceed_hours_30d ?? "\u2014"}h/30d</span></div>
+    <div class="detail-section">
+      <h4>Score breakdown</h4>
+      ${breakdown}
     </div>
 
-    <div class="section-title">Recommended Actions</div>
-    ${recHtml}
+    <div class="detail-section">
+      <h4>Top drivers · plain English</h4>
+      ${driversHtml}
+    </div>
+
+    <div class="detail-section">
+      <h4>Raw inputs</h4>
+      ${inputsHtml}
+    </div>
+
+    <div class="detail-section">
+      <h4>Recommended actions · ranked</h4>
+      ${recHtml}
+    </div>
   `;
+
+  // Open right panel
+  document.body.classList.add("has-detail");
+  document.querySelector(".detail-wrap")?.setAttribute("aria-hidden", "false");
+  // Trigger map resize so MapLibre recalculates center/zoom for the narrower canvas
+  setTimeout(() => map.resize(), 260);
 }
 
-// ---- sidebar: top list ----
+// Close/hide the right panel
+function closeDetail() {
+  document.body.classList.remove("has-detail");
+  document.querySelector(".detail-wrap")?.setAttribute("aria-hidden", "true");
+  // Clear the selected-facility highlight ring
+  highlightFacility(null);
+  // Update map size after CSS transition
+  setTimeout(() => map.resize(), 260);
+}
+
+// ---- sidebar: top list (design: 6 rows, .crit-row grid) ----
 function renderTopList() {
-  // Prioritize named facilities — they're actionable. Unnamed ones go to the bottom.
+  // Prioritise named facilities, then by score
   const sorted = [...filteredFeatures].sort((a, b) => {
     const aName = a.properties.name || "";
     const bName = b.properties.name || "";
     const aUnnamed = !aName || aName.startsWith("Unnamed");
     const bUnnamed = !bName || bName.startsWith("Unnamed");
-    if (aUnnamed !== bUnnamed) return aUnnamed ? 1 : -1; // named first
-    return b.properties.risk_score - a.properties.risk_score;  // then by score
-  }).slice(0, 10);
-  if (!sorted.length) { document.getElementById("top-list").innerHTML = ""; return; }
-  document.getElementById("top-list").innerHTML = `
-    <h3>Most Critical Facilities</h3>
-    ${sorted.map(f => {
-      const p = f.properties; const s = p.risk_score;
-      return `<div class="top-item" data-id="${p.id}">
-        <div class="badge" style="background:${bandColor(s)}18;color:${bandColor(s)}">${s.toFixed(0)}</div>
-        <div class="meta">
-          <div class="name">${typeIcon(p.facility_type)} ${displayName(f)}</div>
-          <div class="sub">${p.facility_type} \u00b7 ${bandLabel(s)}</div>
-        </div>
-      </div>`;
-    }).join("")}
-    <button class="btn primary" id="btn-view-all" style="width:100%;margin-top:12px">
-      View All ${filteredFeatures.length} Facilities
-    </button>
-  `;
-  document.querySelectorAll(".top-item").forEach(el => {
+    if (aUnnamed !== bUnnamed) return aUnnamed ? 1 : -1;
+    return b.properties.risk_score - a.properties.risk_score;
+  }).slice(0, 6);
+
+  // Update the kicker with country + count
+  const kicker = document.getElementById("top-list-kicker");
+  if (kicker) {
+    const country = currentData?.metadata?.country || "";
+    kicker.textContent = country ? `${country} · top ${sorted.length}` : `top ${sorted.length}`;
+  }
+
+  const host = document.getElementById("top-list");
+  if (!sorted.length) { host.innerHTML = '<div style="color:var(--paper-soft);font-size:12px;padding:6px 0">No facilities match the current filters.</div>'; return; }
+
+  host.innerHTML = sorted.map(f => {
+    const p = f.properties; const s = p.risk_score;
+    return `<div class="crit-row" data-id="${p.id}">
+      <span class="d" style="background:${bandColor(s)}"></span>
+      <span class="n" title="${displayName(f).replace(/"/g, '&quot;')}">${displayName(f)}</span>
+      <span class="s">${s.toFixed(0)}</span>
+    </div>`;
+  }).join("");
+
+  host.querySelectorAll(".crit-row").forEach(el => {
     el.addEventListener("click", () => {
       const f = filteredFeatures.find(ff => ff.properties.id === el.dataset.id);
-      if (f) { map.flyTo({ center: f.geometry.coordinates, zoom: 13 }); highlightFacility(f); renderDetail(f); }
+      if (!f) return;
+      host.querySelectorAll(".crit-row").forEach(r => r.classList.remove("active"));
+      el.classList.add("active");
+      map.flyTo({ center: f.geometry.coordinates, zoom: 13 });
+      highlightFacility(f);
+      renderDetail(f);
     });
   });
-  const viewAllBtn = document.getElementById("btn-view-all");
-  if (viewAllBtn) viewAllBtn.addEventListener("click", openDataTable);
 }
 
 // ---- full-screen data table ----
@@ -636,19 +813,22 @@ async function switchCountry(iso3) {
   document.getElementById("detail").innerHTML = '<div class="loading"><div class="spinner"></div>Loading atlas\u2026</div>';
 
   map.flyTo({ center: v.center, zoom: v.zoom });
+
+  // Hide the facility detail panel when switching countries
+  document.body.classList.remove("has-detail");
+  document.querySelector(".detail-wrap")?.setAttribute("aria-hidden", "true");
+
   const data = await loadAtlas(iso3);
   currentData = data;
   allFeatures = data.features || [];
 
   // Reset state filter and populate dropdown
   activeFilters.state = "";
-  document.getElementById("state-btn").textContent = "All States / Regions";
+  document.getElementById("state-btn").textContent = "All states / regions";
   populateStates(allFeatures);
   updateSearchPlaceholder();
 
   applyFilters();
-
-  document.getElementById("detail").innerHTML = '<span class="icon">\u{1f30d}</span>Click a facility on the map to see its full risk profile and recommended actions.';
 }
 
 // ---- event wiring ----
@@ -684,6 +864,35 @@ document.addEventListener("DOMContentLoaded", () => {
   // export buttons
   document.getElementById("btn-csv").addEventListener("click", exportCSV);
   document.getElementById("btn-geojson").addEventListener("click", exportGeoJSON);
+
+  // detail-panel close button
+  const closeBtn = document.getElementById("btn-close-detail");
+  if (closeBtn) closeBtn.addEventListener("click", closeDetail);
+
+  // "/" keyboard shortcut → focus search input
+  document.addEventListener("keydown", (e) => {
+    // Don't hijack when user is already typing in a field
+    const t = e.target;
+    const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+    if (e.key === "/" && !typing) {
+      e.preventDefault();
+      document.getElementById("search")?.focus();
+    }
+    if (e.key === "Escape") {
+      // Close detail panel on Escape
+      if (document.body.classList.contains("has-detail")) closeDetail();
+    }
+  });
+
+  // About nav — placeholder anchor for now; will route to real /about page later
+  const aboutNav = document.getElementById("nav-about");
+  if (aboutNav) {
+    aboutNav.addEventListener("click", (e) => {
+      e.preventDefault();
+      // Lightweight "coming soon" note for now
+      alert("The About page is coming soon. For now, the project README (linked via the GitHub button) has the full methodology and data sources.");
+    });
+  }
 });
 
 // ---- heatmap layer toggle ----
@@ -692,8 +901,10 @@ let heatmapVisible = false;
 function toggleHeatmap() {
   heatmapVisible = !heatmapVisible;
   const btn = document.getElementById("btn-heatmap");
+  const hud = document.getElementById("hud-heatmap");
   if (heatmapVisible) {
-    btn.classList.add("primary");
+    btn?.classList.add("active");
+    if (hud) hud.textContent = "Heatmap · on";
     if (!map.getLayer("heatmap")) {
       map.addLayer({
         id: "heatmap", type: "heatmap", source: "facilities",
@@ -703,16 +914,22 @@ function toggleHeatmap() {
           "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, 0.5, 14, 2],
           "heatmap-color": [
             "interpolate", ["linear"], ["heatmap-density"],
-            0, "rgba(0,0,0,0)", 0.2, "#2ecc71", 0.4, "#f1c40f", 0.6, "#f0932b", 0.8, "#ff3333", 1, "#c0392b"
+            0, "rgba(0,0,0,0)",
+            0.2, "#6FA774",   // low
+            0.4, "#D9B653",   // mod
+            0.6, "#D9894F",   // high
+            0.8, "#C35248",   // severe
+            1,   "#A63D34"    // extreme deepening
           ],
           "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 8, 14, 30],
-          "heatmap-opacity": 0.7,
+          "heatmap-opacity": 0.75,
         },
       }, "facilities-glow");
     }
     map.setLayoutProperty("heatmap", "visibility", "visible");
   } else {
-    btn.classList.remove("primary");
+    btn?.classList.remove("active");
+    if (hud) hud.textContent = "Heatmap · off";
     if (map.getLayer("heatmap")) map.setLayoutProperty("heatmap", "visibility", "none");
   }
 }
@@ -727,15 +944,18 @@ function printSummary() {
 
   const win = window.open("", "_blank");
   win.document.write(`<!doctype html><html><head><title>ChildClimate Atlas Report — ${m.country}</title>
-    <style>body{font-family:system-ui;max-width:800px;margin:40px auto;color:#1a1a2e;line-height:1.5}
-    h1{font-size:22px;border-bottom:2px solid #4fb3ff;padding-bottom:8px}
+    <style>body{font-family:-apple-system,system-ui,sans-serif;max-width:820px;margin:40px auto;color:#1E2433;line-height:1.55}
+    h1{font-size:22px;border-bottom:2px solid #C96A3F;padding-bottom:8px;letter-spacing:-0.01em}
+    h2{font-size:15px;letter-spacing:0.04em;text-transform:uppercase;color:#6B7289;margin-top:24px}
     table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13px}
-    th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #eee}
-    th{background:#f7f8fa;font-weight:600}
-    .badge{display:inline-block;padding:2px 8px;border-radius:12px;font-weight:700;font-size:12px}
-    .high{background:#fef0e2;color:#f0932b}.severe{background:#fde8e7;color:#ff3333}
-    .mid{background:#fef9e2;color:#b8860b}.low{background:#e8f8f0;color:#2ecc71}
-    .footer{margin-top:32px;font-size:11px;color:#888;border-top:1px solid #eee;padding-top:12px}
+    th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #EDEAE2}
+    th{background:#FAF8F4;font-weight:600}
+    .badge{display:inline-block;padding:2px 8px;border-radius:2px;font-weight:600;font-size:11px;letter-spacing:0.04em;text-transform:uppercase}
+    .low{background:rgba(111,167,116,0.14);color:#3E7B49}
+    .mid{background:rgba(217,182,83,0.18);color:#8A6F13}
+    .high{background:rgba(217,137,79,0.18);color:#A24F1B}
+    .severe{background:rgba(195,82,72,0.16);color:#8C2B24}
+    .footer{margin-top:32px;font-size:11px;color:#9AA0B3;border-top:1px solid #EDEAE2;padding-top:12px}
     </style></head><body>
     <h1>ChildClimate Risk Atlas — ${m.country}</h1>
     <p><b>Region:</b> ${m.focus_region} | <b>Facilities analyzed:</b> ${n} | <b>Average risk:</b> ${avg}/100</p>
