@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en" translate="no">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ChildClimate Risk Atlas</title>
+  <meta name="description" content="Facility-level climate & health vulnerability scores for schools and clinics, anywhere in the world. A Trameter open-source project." />
+  <meta name="google" content="notranslate" />
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+  <link rel="stylesheet" href="./assets/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌍</text></svg>" />
+</head>
+<body>
+
+  <aside id="sidebar">
+    <!-- header -->
+    <div class="header">
+      <div class="brand">
+        <div class="logo">CA</div>
+        <div>
+          <h1>ChildClimate Risk Atlas</h1>
+          <p class="tagline">Facility-level climate vulnerability scores for children.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- search bar (top) -->
+    <div class="search-bar">
+      <label for="search">Find a specific facility</label>
+      <input type="text" id="search" placeholder="Search all facilities…" />
+    </div>
+
+    <!-- controls: country + state -->
+    <div class="controls">
+      <div class="control-group">
+        <label for="country">Country</label>
+        <select id="country">
+          <option value="NGA">🇳🇬 Nigeria</option>
+          <option value="BGD">🇧🇩 Bangladesh</option>
+          <option value="GTM">🇬🇹 Guatemala</option>
+        </select>
+      </div>
+      <div class="control-group" id="state-wrap" style="position:relative">
+        <label>State / Region</label>
+        <button type="button" id="state-btn" class="state-btn">All States / Regions</button>
+        <div id="state-panel" class="state-panel"></div>
+      </div>
+    </div>
+
+    <!-- filter chips -->
+    <div class="filters">
+      <button class="chip active" data-type="clinic"><span class="dot" style="background:#4fb3ff"></span>Clinics</button>
+      <button class="chip active" data-type="hospital"><span class="dot" style="background:#7c3aed"></span>Hospitals</button>
+      <button class="chip active" data-type="school"><span class="dot" style="background:#f97316"></span>Schools</button>
+      <span style="width:1px;background:var(--border-2);margin:0 2px"></span>
+      <button class="chip active" data-band="low"><span class="dot" style="background:#2ecc71"></span>Low</button>
+      <button class="chip active" data-band="mid"><span class="dot" style="background:#f1c40f"></span>Mod</button>
+      <button class="chip active" data-band="high"><span class="dot" style="background:#f0932b"></span>High</button>
+      <button class="chip active" data-band="severe"><span class="dot" style="background:#ff3333"></span>Severe</button>
+    </div>
+
+    <!-- scrollable body -->
+    <div class="sidebar-scroll">
+      <!-- stats -->
+      <div id="stats" class="stats"></div>
+
+      <!-- distribution bar -->
+      <div id="dist"></div>
+
+      <!-- export -->
+      <div class="export-bar">
+        <button class="btn" id="btn-heatmap">&#128293; Heatmap</button>
+        <button class="btn" id="btn-csv">&#128196; CSV</button>
+        <button class="btn" id="btn-geojson">&#127758; GeoJSON</button>
+        <button class="btn" id="btn-print">&#128424; Report</button>
+      </div>
+
+      <!-- detail panel -->
+      <div id="detail" class="detail empty">
+        <span class="icon">🌍</span>
+        Click a facility on the map to see its full risk profile and recommended actions.
+      </div>
+
+      <!-- top list -->
+      <div id="top-list" class="top-list"></div>
+    </div>
+
+    <!-- footer -->
+    <div class="footer">
+      <p>Data: OSM, Open-Meteo, Copernicus CAMS, WHO, WorldPop</p>
+      <p>
+        <a href="https://github.com/Trameter/childclimate-atlas" target="_blank" rel="noopener">Open source &middot; MIT</a>
+      </p>
+      <p style="margin-top:4px">&copy; 2026 Trameter Nigeria Ltd</p>
+    </div>
+  </aside>
+
+  <div id="map">
+    <!-- map legend -->
+    <div class="map-legend">
+      <h4>Child Climate Risk Score</h4>
+      <div class="row"><div class="swatch" style="background:#2ecc71"></div> 0–29 Low</div>
+      <div class="row"><div class="swatch" style="background:#f1c40f"></div> 30–54 Moderate</div>
+      <div class="row"><div class="swatch" style="background:#f0932b"></div> 55–74 High</div>
+      <div class="row"><div class="swatch" style="background:#ff3333"></div> 75–100 Severe</div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="./assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,34 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+credentials.json
+token.json
+
+# Pipeline intermediate artefacts (raw + per-country processed).
+# The production GeoJSONs consumed by the web UI live in web/data/ and ARE committed.
+data/raw/
+data/processed/*/
+!data/processed/.gitkeep
+
+# Editor / tooling
+node_modules/
+.tmp/
+.idea/
+.vscode/
+.claude/

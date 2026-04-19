@@ -1,0 +1,32 @@
+# Guatemala — country configuration
+country:
+  iso3: GTM
+  iso2: GT
+  name: Guatemala
+  capital: Guatemala City
+
+bbox: [-92.3, 13.7, -88.2, 17.9]
+
+focus_region:
+  name: "Guatemala City Metro"
+  bbox: [-90.7, 14.5, -90.4, 14.8]
+
+population:
+  total_millions: 18
+  under_18_share: 0.41
+  under_5_share: 0.11
+
+sources:
+  healthsites: true
+  osm_schools: true
+  open_meteo: true
+  air_quality: true
+  worldpop: false
+
+scoring_weights:
+  heat_exposure: 0.20
+  air_pollution: 0.20
+  flood_risk: 0.15
+  drought_risk: 0.20   # Dry corridor is a major child malnutrition driver
+  child_density: 0.15
+  facility_fragility: 0.10

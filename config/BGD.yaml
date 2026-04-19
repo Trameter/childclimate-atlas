@@ -1,0 +1,32 @@
+# Bangladesh — country configuration
+country:
+  iso3: BGD
+  iso2: BD
+  name: Bangladesh
+  capital: Dhaka
+
+bbox: [88.0, 20.6, 92.7, 26.6]
+
+focus_region:
+  name: "Dhaka Division"
+  bbox: [89.8, 23.3, 91.1, 24.5]
+
+population:
+  total_millions: 173
+  under_18_share: 0.33
+  under_5_share: 0.09
+
+sources:
+  healthsites: true
+  osm_schools: true
+  open_meteo: true
+  air_quality: true
+  worldpop: false
+
+scoring_weights:
+  heat_exposure: 0.20
+  air_pollution: 0.25
+  flood_risk: 0.30   # Bangladesh is flood-dominant
+  drought_risk: 0.05
+  child_density: 0.15
+  facility_fragility: 0.05

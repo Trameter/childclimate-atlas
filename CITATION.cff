@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+title: "ChildClimate Risk Atlas"
+message: "If you use this software or its outputs, please cite as below."
+type: software
+authors:
+  - given-names: Victoria
+    family-names: "(project lead)"
+    affiliation: "Trameter Nigeria Ltd"
+repository-code: "https://github.com/Trameter/childclimate-atlas"
+url: "https://github.com/Trameter/childclimate-atlas"
+license: MIT
+keywords:
+  - climate
+  - children
+  - health
+  - vulnerability
+  - UNICEF
+  - CCRI
+  - open-data
+  - geospatial
+  - OpenStreetMap
+abstract: >
+  An open-source pipeline that produces facility-level 0-100 Child Climate
+  Risk Scores for schools and health clinics worldwide, combining climate,
+  air-quality, population, and geospatial data to help decision-makers
+  prioritise which facilities to protect first.

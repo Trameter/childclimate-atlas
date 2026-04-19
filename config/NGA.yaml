@@ -1,0 +1,44 @@
+# Nigeria — country configuration for ChildClimate Risk Atlas
+#
+# All geographic bounds use WGS84 (EPSG:4326). ISO codes follow ISO-3166-1 alpha-3.
+
+country:
+  iso3: NGA
+  iso2: NG
+  name: Nigeria
+  capital: Abuja
+
+# Bounding box: [west, south, east, north]
+# Nigeria: roughly 2.7°E to 14.7°E, 4.3°N to 13.9°N
+bbox: [2.7, 4.3, 14.7, 13.9]
+
+# Demo focus region for the first polished build (Kano State — high child population,
+# real heat + pollution stress, strategic for demonstration).
+focus_region:
+  name: "Kano State"
+  bbox: [8.0, 10.5, 9.6, 12.7]
+
+# Population facts (for sanity checks & weighting)
+population:
+  total_millions: 223
+  under_18_share: 0.47  # ~47% of Nigerians are under 18 (UN DESA)
+  under_5_share: 0.16
+
+# Data source toggles
+sources:
+  healthsites: true         # Health facilities from Healthsites.io
+  osm_schools: true         # Schools from OpenStreetMap Overpass
+  open_meteo: true          # ERA5 climate data
+  air_quality: true         # Sentinel-5P / CAMS air quality proxy
+  worldpop: false           # WorldPop child density (large files — enable in prod)
+
+# Scoring weights — sum to 1.0
+# These are tuned heuristically for the prototype; the model supports
+# country-specific overrides as better local data becomes available.
+scoring_weights:
+  heat_exposure: 0.25
+  air_pollution: 0.25
+  flood_risk: 0.15
+  drought_risk: 0.10
+  child_density: 0.15
+  facility_fragility: 0.10
