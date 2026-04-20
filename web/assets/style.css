@@ -6,17 +6,18 @@
 @import url('./fonts-local.css');
 
 :root {
-  /* palette */
-  --ink: #1E2433;
-  --ink-2: #262D40;
-  --ink-3: #323A52;
+  /* palette — ink range pushed darker for sharper text contrast
+     (paper on ink now ~15:1, well above WCAG AAA 7:1) */
+  --ink: #101520;
+  --ink-2: #181E2D;
+  --ink-3: #242B3F;
   --paper: #FAF8F4;
   --paper-2: #EDEAE2;
-  --paper-mute: #9AA0B3;
-  --paper-soft: #6B7289;
-  --rule: #2F3750;
-  --ember: #C96A3F;
-  --ember-soft: rgba(201, 106, 63, 0.16);
+  --paper-mute: #B4B9CC;      /* lightened from 9AA0B3 for muted-text readability */
+  --paper-soft: #7E85A0;      /* lightened from 6B7289 */
+  --rule: #28304A;
+  --ember: #D87B4F;            /* slightly brightened so it pops on darker ink */
+  --ember-soft: rgba(216, 123, 79, 0.18);
 
   /* risk bands */
   --low: #6FA774;
@@ -131,8 +132,9 @@ button { font-family: inherit; }
 .shell {
   display: grid;
   grid-template-columns: var(--left-w) 1fr 0;
-  transition: grid-template-columns 220ms ease;
   height: calc(100vh - var(--topbar-h) - var(--footer-h));
+  /* No transition on grid-template-columns — it's janky across browsers.
+     We animate just the right panel's content instead. */
 }
 body.has-detail .shell {
   grid-template-columns: var(--left-w) 1fr var(--right-w);
@@ -222,6 +224,7 @@ body:not(.has-detail) .side-r { border-left-color: transparent; }
 
 /* ---------- Search ---------- */
 .search {
+  position: relative;
   display: flex; align-items: center; gap: 10px;
   border: 1px solid var(--rule);
   border-radius: 3px;
@@ -247,6 +250,73 @@ body:not(.has-detail) .side-r { border-left-color: transparent; }
   padding: 2px 6px;
   border-radius: 2px;
   user-select: none;
+}
+
+/* Search autocomplete dropdown */
+.search-results {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  max-height: 360px;
+  overflow-y: auto;
+  z-index: 18;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+}
+.search-results.open { display: block; }
+.search-result {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+  align-items: center;
+  transition: background 0.1s, color 0.1s;
+}
+.search-result:last-child { border-bottom: 0; }
+.search-result:hover,
+.search-result.hl {
+  background: var(--ink-3);
+}
+.search-result .d {
+  width: 10px; height: 10px; border-radius: 50%;
+  flex-shrink: 0;
+}
+.search-result .t {
+  font-size: 13px;
+  color: var(--paper);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.search-result .sub {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  color: var(--paper-soft);
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+}
+.search-result .s {
+  font-family: "JetBrains Mono";
+  font-size: 11px;
+  color: var(--paper-mute);
+  letter-spacing: 0.02em;
+}
+.search-result.hl .s { color: var(--paper); }
+.search-result .meta {
+  display: flex; flex-direction: column;
+  min-width: 0;
+}
+.search-empty {
+  padding: 16px 12px;
+  color: var(--paper-soft);
+  font-size: 12px;
+  text-align: center;
 }
 
 /* ---------- Fields / selects ---------- */
@@ -545,8 +615,13 @@ body:not(.has-detail) .side-r { border-left-color: transparent; }
 
 /* =========================================================================
    RIGHT PANEL — facility detail
+   Absolute-positioned inner so overflow/scroll is guaranteed regardless of
+   flex quirks. The panel fades in on `body.has-detail`.
    ========================================================================= */
-.detail-wrap { position: relative; }
+.detail-wrap {
+  position: relative;
+  overflow: hidden; /* clip during transition */
+}
 .detail-wrap .detail-close {
   position: absolute;
   top: 14px; right: 18px;
@@ -554,7 +629,7 @@ body:not(.has-detail) .side-r { border-left-color: transparent; }
   width: 30px; height: 30px;
   border-radius: 3px;
   border: 1px solid var(--rule);
-  background: rgba(30,36,51,0.7);
+  background: rgba(16,21,32,0.85);
   color: var(--paper-mute);
   font-size: 20px; line-height: 1;
   cursor: pointer;
@@ -568,7 +643,25 @@ body:not(.has-detail) .side-r { border-left-color: transparent; }
 }
 body:not(.has-detail) .detail-wrap .detail-close { display: none; }
 
-.detail { padding: 0; }
+/* The scroll container — pinned to the sides, vertically scrollable.
+   Using absolute inset instead of flex ensures the browser always knows
+   the container height, so overflow-y:auto reliably produces a scrollbar. */
+#detail.detail {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0;
+  opacity: 0;
+  transform: translateX(12px);
+  transition: opacity 180ms ease-out, transform 180ms ease-out;
+  pointer-events: none;
+}
+body.has-detail #detail.detail {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
 .detail .head {
   padding: 22px 22px 18px;
   border-bottom: 1px solid var(--rule);

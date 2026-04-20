@@ -7,6 +7,14 @@ const VIEWS = {
   GTM: { center: [-90.2, 15.8], zoom: 7.2 },   // full Guatemala
 };
 
+// Display name for each country so we can update the UI synchronously on
+// country switch (before the async GeoJSON fetch completes).
+const COUNTRY_NAMES = {
+  NGA: "Nigeria",
+  BGD: "Bangladesh",
+  GTM: "Guatemala",
+};
+
 // ---- helpers ----
 // Risk-band colours match the CSS design-system tokens exactly:
 //   low #6FA774 · mod #D9B653 · high #D9894F · severe #C35248
@@ -200,6 +208,109 @@ function updateSearchPlaceholder() {
     const name = currentData?.metadata?.country || "all";
     search.placeholder = `Search all of ${name}…`;
   }
+}
+
+// ========================================================================
+// SEARCH AUTOCOMPLETE
+// Renders a dropdown of matching facilities as the user types. Keyboard
+// support: ↑/↓ to navigate, Enter to select, Esc to close.
+// ========================================================================
+let searchHighlightIdx = -1;
+let searchResultFeatures = [];
+
+function renderSearchResults(query) {
+  const panel = document.getElementById("search-results");
+  const input = document.getElementById("search");
+  if (!panel) return;
+
+  const q = (query || "").toLowerCase().trim();
+  if (!q) {
+    closeSearchResults();
+    return;
+  }
+
+  // Score matches: prefer startsWith, then word-start, then contains.
+  const scored = [];
+  for (const f of allFeatures) {
+    // Scope to selected state if any
+    if (activeFilters.state && getState(f) !== activeFilters.state) continue;
+    const name = displayName(f).toLowerCase();
+    if (!name.includes(q)) continue;
+    let rank;
+    if (name.startsWith(q)) rank = 0;
+    else if (new RegExp("\\b" + q.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")).test(name)) rank = 1;
+    else rank = 2;
+    scored.push({ f, rank, score: f.properties.risk_score });
+  }
+  scored.sort((a, b) => a.rank - b.rank || b.score - a.score);
+
+  const results = scored.slice(0, 12).map(x => x.f);
+  searchResultFeatures = results;
+  searchHighlightIdx = results.length ? 0 : -1;
+
+  if (!results.length) {
+    panel.innerHTML = '<div class="search-empty">No matching facilities.</div>';
+    panel.classList.add("open");
+    input?.setAttribute("aria-expanded", "true");
+    return;
+  }
+
+  panel.innerHTML = results.map((f, i) => {
+    const p = f.properties;
+    const s = p.risk_score;
+    const stateLabel = getState(f);
+    const stateText = stateLabel && stateLabel !== "Untagged Region" ? stateLabel : "—";
+    return `<div class="search-result${i === 0 ? " hl" : ""}" role="option" data-id="${p.id}" data-idx="${i}">
+      <span class="d" style="background:${bandColor(s)}"></span>
+      <div class="meta">
+        <span class="t">${displayName(f)}</span>
+        <span class="sub">${(p.facility_type || "").toUpperCase()} · ${stateText}</span>
+      </div>
+      <span class="s">${s.toFixed(0)}</span>
+    </div>`;
+  }).join("");
+  panel.classList.add("open");
+  input?.setAttribute("aria-expanded", "true");
+
+  panel.querySelectorAll(".search-result").forEach(el => {
+    el.addEventListener("click", () => selectSearchResult(parseInt(el.dataset.idx, 10)));
+    el.addEventListener("mouseenter", () => {
+      panel.querySelectorAll(".search-result").forEach(r => r.classList.remove("hl"));
+      el.classList.add("hl");
+      searchHighlightIdx = parseInt(el.dataset.idx, 10);
+    });
+  });
+}
+
+function closeSearchResults() {
+  const panel = document.getElementById("search-results");
+  const input = document.getElementById("search");
+  if (panel) { panel.classList.remove("open"); panel.innerHTML = ""; }
+  input?.setAttribute("aria-expanded", "false");
+  searchResultFeatures = [];
+  searchHighlightIdx = -1;
+}
+
+function selectSearchResult(idx) {
+  const f = searchResultFeatures[idx];
+  if (!f) return;
+  map.flyTo({ center: f.geometry.coordinates, zoom: 13 });
+  highlightFacility(f);
+  renderDetail(f);
+  const input = document.getElementById("search");
+  if (input) input.value = displayName(f);
+  closeSearchResults();
+}
+
+function moveSearchHighlight(delta) {
+  if (!searchResultFeatures.length) return;
+  searchHighlightIdx = (searchHighlightIdx + delta + searchResultFeatures.length) % searchResultFeatures.length;
+  const panel = document.getElementById("search-results");
+  panel?.querySelectorAll(".search-result").forEach(el => {
+    const i = parseInt(el.dataset.idx, 10);
+    el.classList.toggle("hl", i === searchHighlightIdx);
+    if (i === searchHighlightIdx) el.scrollIntoView({ block: "nearest" });
+  });
 }
 
 // ---- filtering ----
@@ -516,12 +627,18 @@ function renderDetail(feature) {
   const latStr = `${Math.abs(coords[1]).toFixed(3)}° ${coords[1] >= 0 ? "N" : "S"}`;
   const lonStr = `${Math.abs(coords[0]).toFixed(3)}° ${coords[0] >= 0 ? "E" : "W"}`;
 
-  // Rough "top 1.X%" based on rank within country — computed from allFeatures
+  // Rank within country — computed live from allFeatures.
+  // Smart precision so a #1-of-10,927 facility doesn't misleadingly round
+  // to "Top 0.0%".
   const total = allFeatures.length;
   const rank = allFeatures.filter(f => f.properties.risk_score > s).length + 1;
   const pct = total ? ((rank / total) * 100) : 0;
+  let pctStr;
+  if (pct < 0.1) pctStr = pct.toFixed(2);
+  else if (pct < 1) pctStr = pct.toFixed(1);
+  else pctStr = String(Math.round(pct));
   const rankLine = total > 0
-    ? `Top ${pct.toFixed(1)}% of ${country} facilities by composite child-climate exposure.`
+    ? `Rank ${rank.toLocaleString()} of ${total.toLocaleString()} in ${country} — top ${pctStr}% by composite child-climate exposure.`
     : "";
 
   document.getElementById("detail").innerHTML = `
@@ -807,27 +924,56 @@ function exportGeoJSON() {
 // ---- main switch ----
 async function switchCountry(iso3) {
   const v = VIEWS[iso3] || VIEWS.NGA;
+  const newName = COUNTRY_NAMES[iso3] || iso3;
 
-  // show loading
-  document.getElementById("detail").className = "detail empty";
-  document.getElementById("detail").innerHTML = '<div class="loading"><div class="spinner"></div>Loading atlas\u2026</div>';
+  // --- 1. SYNCHRONOUS UI RESET (runs immediately, no await) --------------
+  // Update every piece of text that references the country name NOW so the
+  // UI isn't showing stale country info during the async fetch below.
+  const chipText = document.getElementById("facility-chip-text");
+  if (chipText) chipText.textContent = `${newName} · loading…`;
 
-  map.flyTo({ center: v.center, zoom: v.zoom });
+  const hudC = document.getElementById("hud-country");
+  if (hudC) hudC.textContent = `${newName} · loading…`;
 
-  // Hide the facility detail panel when switching countries
+  const kicker = document.getElementById("top-list-kicker");
+  if (kicker) kicker.textContent = `${newName} · loading`;
+
+  // Reset state filter + dropdown label + panel contents immediately
+  activeFilters.state = "";
+  const stateBtn = document.getElementById("state-btn");
+  if (stateBtn) stateBtn.textContent = "All states / regions";
+  const statePanel = document.getElementById("state-panel");
+  if (statePanel) { statePanel.innerHTML = ""; statePanel.classList.remove("open"); }
+
+  // Reset search
+  const searchInput = document.getElementById("search");
+  if (searchInput) searchInput.value = "";
+  activeFilters.search = "";
+  closeSearchResults();
+
+  // Clear current view stats + top list while data loads
+  const statsEl = document.getElementById("stats");
+  if (statsEl) statsEl.innerHTML = '<div class="stats-loading">Loading…</div>';
+  const distEl = document.getElementById("dist");
+  if (distEl) distEl.innerHTML = "";
+  const topListEl = document.getElementById("top-list");
+  if (topListEl) topListEl.innerHTML = '<div style="color:var(--paper-soft);font-size:12px;padding:6px 0">Loading facilities…</div>';
+
+  // Hide facility drill-down panel
   document.body.classList.remove("has-detail");
   document.querySelector(".detail-wrap")?.setAttribute("aria-hidden", "true");
 
+  // Start the map fly animation immediately
+  map.flyTo({ center: v.center, zoom: v.zoom });
+
+  // --- 2. ASYNC DATA FETCH -----------------------------------------------
   const data = await loadAtlas(iso3);
   currentData = data;
   allFeatures = data.features || [];
 
-  // Reset state filter and populate dropdown
-  activeFilters.state = "";
-  document.getElementById("state-btn").textContent = "All states / regions";
+  // --- 3. RE-RENDER with real data ---------------------------------------
   populateStates(allFeatures);
   updateSearchPlaceholder();
-
   applyFilters();
 }
 
@@ -839,7 +985,35 @@ document.addEventListener("DOMContentLoaded", () => {
     e.stopPropagation();
     document.getElementById("state-panel").classList.toggle("open");
   });
-  document.getElementById("search").addEventListener("input", e => { activeFilters.search = e.target.value; applyFilters(); });
+  // Search: autocomplete dropdown + live map filter
+  const searchInput = document.getElementById("search");
+  searchInput.addEventListener("input", e => {
+    const v = e.target.value;
+    activeFilters.search = v;
+    applyFilters();            // also filter the map dots
+    renderSearchResults(v);    // and show a dropdown of matches
+  });
+  searchInput.addEventListener("focus", e => {
+    // Re-show last results on re-focus if input still has text
+    if (e.target.value) renderSearchResults(e.target.value);
+  });
+  searchInput.addEventListener("keydown", e => {
+    const panel = document.getElementById("search-results");
+    const open = panel?.classList.contains("open");
+    if (e.key === "ArrowDown") { if (open) { e.preventDefault(); moveSearchHighlight(1); } }
+    else if (e.key === "ArrowUp") { if (open) { e.preventDefault(); moveSearchHighlight(-1); } }
+    else if (e.key === "Enter") {
+      if (open && searchHighlightIdx >= 0) { e.preventDefault(); selectSearchResult(searchHighlightIdx); }
+    }
+    else if (e.key === "Escape") {
+      if (open) { e.preventDefault(); e.stopPropagation(); closeSearchResults(); }
+    }
+  });
+  // Click outside = close dropdown
+  document.addEventListener("click", (e) => {
+    const search = document.querySelector(".search");
+    if (search && !search.contains(e.target)) closeSearchResults();
+  });
 
   // type chips
   document.querySelectorAll(".chip[data-type]").forEach(el => {
