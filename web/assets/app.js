@@ -37,11 +37,30 @@ function prettyKey(k) {
   return M[k] || k.replace(/_/g, " ");
 }
 function typeIcon(t) { return t === "hospital" ? "\u{1F3E5}" : t === "clinic" ? "\u{1FA7A}" : "\u{1F3EB}"; }
+// Normalize display-casing for OSM names that are entered in ALL CAPS.
+// A string is "shouty" if >=70% of its letters are uppercase AND it's long
+// enough for that to be meaningful (<=4-char strings like "NHS" pass through).
+function displayCase(s) {
+  if (!s) return s;
+  const letters = s.replace(/[^A-Za-z]/g, "");
+  if (letters.length < 5) return s;
+  const ups = letters.replace(/[^A-Z]/g, "").length;
+  if (ups / letters.length < 0.7) return s; // already mixed case — trust it
+  // Title-case each word, keep short connector words lowercase
+  const small = new Set(["of","the","and","for","a","an","in","on","at","to","de","la","le","du","des","von","van"]);
+  return s.toLowerCase().split(/(\s+|-)/).map((word, i, arr) => {
+    if (!word.trim()) return word;
+    if (i > 0 && small.has(word)) return word;
+    return word.charAt(0).toUpperCase() + word.slice(1);
+  }).join("");
+}
 function displayName(f) {
   const p = f.properties || f;
   const name = p.name || "";
-  // If facility has a real name, return it as-is (CSS handles truncation)
-  if (name && !name.startsWith("Unnamed")) return name;
+  // If facility has a real name, return it with display-casing normalization
+  // (so ALL-CAPS OSM entries render as "Hotoro Maradi Special Primary School"
+  // rather than "HOTORO MARADI SPECIAL PRIMARY SCHOOL").
+  if (name && !name.startsWith("Unnamed")) return displayCase(name);
   // For unnamed facilities, build a useful label from available metadata
   const type = (p.facility_type || "facility");
   const typeCap = type.charAt(0).toUpperCase() + type.slice(1);
@@ -95,12 +114,46 @@ let filteredFeatures = [];
 let activeFilters = { types: new Set(["clinic", "hospital", "school"]), bands: new Set(["low", "mid", "high", "severe"]), search: "", state: "", searchType: "" };
 
 // ---- data loading ----
+// In-memory cache keyed by ISO3 so a country is fetched at most once per
+// session. Combined with the browser's HTTP cache (we no longer set
+// cache:"no-store"), switching BACK to a country you've already viewed is
+// instant and cold country-switches only pay the download cost the first
+// time they happen.
+const dataCache = new Map();
+const inflight = new Map(); // dedupe concurrent requests for the same country
+
 async function loadAtlas(iso3) {
-  try {
-    const r = await fetch(`./data/${iso3}.geojson`, { cache: "no-store" });
-    if (!r.ok) throw new Error(r.status);
-    return await r.json();
-  } catch { return FALLBACK; }
+  if (dataCache.has(iso3)) return dataCache.get(iso3);
+  if (inflight.has(iso3)) return inflight.get(iso3);
+  const p = (async () => {
+    try {
+      const r = await fetch(`./data/${iso3}.geojson`);
+      if (!r.ok) throw new Error(r.status);
+      const data = await r.json();
+      dataCache.set(iso3, data);
+      return data;
+    } catch {
+      return FALLBACK;
+    } finally {
+      inflight.delete(iso3);
+    }
+  })();
+  inflight.set(iso3, p);
+  return p;
+}
+
+// After the first country loads, kick off background prefetches of the
+// other two so subsequent switches are instant. Invoked once from
+// switchCountry on the initial load.
+let prefetchedOthers = false;
+function prefetchOtherCountries(currentIso3) {
+  if (prefetchedOthers) return;
+  prefetchedOthers = true;
+  ["NGA", "BGD", "GTM"].forEach(iso3 => {
+    if (iso3 === currentIso3 || dataCache.has(iso3)) return;
+    // Fire-and-forget; ignore errors, don't block UI.
+    loadAtlas(iso3).catch(() => {});
+  });
 }
 
 // ---- map init ----
@@ -259,12 +312,24 @@ function renderSearchResults(query) {
     const p = f.properties;
     const s = p.risk_score;
     const stateLabel = getState(f);
-    const stateText = stateLabel && stateLabel !== "Untagged Region" ? stateLabel : "—";
+    const state = stateLabel && stateLabel !== "Untagged Region" ? stateLabel : "";
+    const type = p.facility_type || "";
+    // If the facility name already ends with the type word, don't duplicate
+    // (e.g. name = "Hassan Gwarzo School" → type="school" is redundant).
+    const name = displayName(f);
+    const nameLower = name.toLowerCase();
+    const typeCap = type ? type.charAt(0).toUpperCase() + type.slice(1) : "";
+    const typeInName = type && nameLower.endsWith(type);
+    // Build a compact subtitle: "type · state" or just the one that's useful
+    const subParts = [];
+    if (typeCap && !typeInName) subParts.push(typeCap);
+    if (state) subParts.push(state);
+    const subText = subParts.join(" · ");
     return `<div class="search-result${i === 0 ? " hl" : ""}" role="option" data-id="${p.id}" data-idx="${i}">
       <span class="d" style="background:${bandColor(s)}"></span>
       <div class="meta">
-        <span class="t">${displayName(f)}</span>
-        <span class="sub">${(p.facility_type || "").toUpperCase()} · ${stateText}</span>
+        <span class="t">${name}</span>
+        ${subText ? `<span class="sub">${subText}</span>` : ""}
       </div>
       <span class="s">${s.toFixed(0)}</span>
     </div>`;
@@ -572,16 +637,20 @@ function renderDetail(feature) {
   const stateName = getState(feature);
   const country = currentData?.metadata?.country || "";
 
-  // Breakdown rows — each sub-score with its inline bar and points
-  const breakdown = Object.keys(weights).map(k => {
+  // Breakdown rows — sorted by contribution (points) descending so the
+  // top rows visually correspond to the "Top drivers" list below.
+  const breakdownData = Object.keys(weights).map(k => {
     const sub = comps[k] || 0;
     const max = 100 * (weights[k] || 0);
     const pts = max * sub;
-    const pct = Math.min(100, Math.max(0, sub * 100));
+    return { key: k, sub, max, pts };
+  }).sort((a, b) => b.pts - a.pts);
+  const breakdown = breakdownData.map(r => {
+    const pct = Math.min(100, Math.max(0, r.sub * 100));
     return `<div class="break-row">
-      <span class="n">${prettyKey(k)}</span>
+      <span class="n">${prettyKey(r.key)}</span>
       <span class="b"><i style="width:${pct.toFixed(0)}%"></i></span>
-      <span class="p">${pts.toFixed(1)}&nbsp;/&nbsp;${max.toFixed(0)}</span>
+      <span class="p">${r.pts.toFixed(1)}&nbsp;/&nbsp;${r.max.toFixed(0)}</span>
     </div>`;
   }).join("");
 
@@ -975,6 +1044,10 @@ async function switchCountry(iso3) {
   populateStates(allFeatures);
   updateSearchPlaceholder();
   applyFilters();
+
+  // --- 4. BACKGROUND PREFETCH (first load only) --------------------------
+  // Warm the cache so switching to the other two countries is instant.
+  prefetchOtherCountries(iso3);
 }
 
 // ---- event wiring ----

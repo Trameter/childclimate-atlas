@@ -252,7 +252,10 @@ body:not(.has-detail) .side-r { border-left-color: transparent; }
   user-select: none;
 }
 
-/* Search autocomplete dropdown */
+/* Search autocomplete dropdown
+   Positioned below the search input. Sits above the sidebar's own scroll
+   context via a high z-index, and the max-height keeps it readable
+   regardless of match count. */
 .search-results {
   display: none;
   position: absolute;
@@ -261,62 +264,76 @@ body:not(.has-detail) .side-r { border-left-color: transparent; }
   background: var(--ink-2);
   border: 1px solid var(--rule);
   border-radius: 3px;
-  max-height: 360px;
+  max-height: 300px;
   overflow-y: auto;
-  z-index: 18;
-  box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+  z-index: 25;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+  /* Explicit font-family so we don't inherit anything odd from a parent */
+  font-family: "Inter Tight", Inter, system-ui, sans-serif;
 }
 .search-results.open { display: block; }
+
 .search-result {
   display: grid;
-  grid-template-columns: 10px 1fr auto;
+  grid-template-columns: 8px 1fr auto;
   gap: 10px;
-  padding: 9px 12px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--rule);
   cursor: pointer;
   align-items: center;
-  transition: background 0.1s, color 0.1s;
+  transition: background 0.1s;
+  /* Force normal-case, consistent sizing — defeats any inherited caps/size */
+  text-transform: none;
+  letter-spacing: normal;
+  line-height: 1.35;
 }
 .search-result:last-child { border-bottom: 0; }
 .search-result:hover,
-.search-result.hl {
-  background: var(--ink-3);
-}
+.search-result.hl { background: var(--ink-3); }
+
 .search-result .d {
-  width: 10px; height: 10px; border-radius: 50%;
+  width: 8px; height: 8px; border-radius: 50%;
   flex-shrink: 0;
 }
+.search-result .meta {
+  display: flex; flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
 .search-result .t {
+  font-family: inherit;
   font-size: 13px;
+  font-weight: 500;
   color: var(--paper);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+  text-transform: none;
 }
 .search-result .sub {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 10px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 400;
   color: var(--paper-soft);
-  letter-spacing: 0.04em;
-  margin-top: 2px;
+  letter-spacing: normal;
+  text-transform: none;
 }
 .search-result .s {
-  font-family: "JetBrains Mono";
+  font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 11px;
   color: var(--paper-mute);
   letter-spacing: 0.02em;
+  flex-shrink: 0;
 }
 .search-result.hl .s { color: var(--paper); }
-.search-result .meta {
-  display: flex; flex-direction: column;
-  min-width: 0;
-}
+
 .search-empty {
-  padding: 16px 12px;
+  padding: 14px 12px;
   color: var(--paper-soft);
   font-size: 12px;
   text-align: center;
+  font-family: inherit;
 }
 
 /* ---------- Fields / selects ---------- */
