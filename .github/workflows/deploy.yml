@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+    paths:
+      # Only deploy when published web assets actually change. Docs-only
+      # commits (README, methodology, etc.) skip the round-trip.
+      - 'web/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -13,12 +19,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Deploy web/ to Namecheap via FTP
+      - name: Deploy web/ to Namecheap via FTPS
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           local-dir: ./web/
-          server-dir: /climate-atlas.trameter.com/
+          # FTP_USERNAME is chrooted to the subdomain's document root
+          # (/home/tramnqes/climate-atlas.trameter.com), so we upload
+          # straight to the user's root. The previous value
+          # (/climate-atlas.trameter.com/) created a nested folder
+          # that didn't serve.
+          server-dir: ./
           protocol: ftps
