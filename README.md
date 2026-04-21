@@ -14,7 +14,7 @@ The Atlas is running at **[climate-atlas.trameter.com](http://climate-atlas.tram
 
 [![ChildClimate Risk Atlas — live at climate-atlas.trameter.com](./docs/atlas-screenshot.png)](http://climate-atlas.trameter.com/)
 
-<sub>Lagos State, Nigeria — 1,036 facilities scored, with *United Primary School, Matogun* (56 / 100 — high risk) open in the drill-down panel.</sub>
+<sub>Nigeria — 6,446 schools and clinics scored at a national view. Pick a country, narrow by state or facility type, and click any dot to open its risk breakdown and recommended actions.</sub>
 
 ---
 
