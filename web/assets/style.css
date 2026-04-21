@@ -1068,8 +1068,19 @@ body.has-detail #detail.detail {
 .data-table th.sortable {
   cursor: pointer;
   transition: color 0.12s;
+  position: relative;
 }
 .data-table th.sortable:hover { color: var(--paper); }
+.data-table th.sortable.sorted { color: var(--ember); }
+.data-table th.sortable.sorted::after {
+  content: "\2193";           /* ↓ descending (default) */
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 10px;
+  opacity: 0.85;
+  transform: translateY(-1px);
+}
+.data-table th.sortable.sorted.asc::after { content: "\2191"; }  /* ↑ ascending */
 .data-table td {
   padding: 11px 16px;
   border-bottom: 1px solid rgba(40, 48, 74, 0.4);

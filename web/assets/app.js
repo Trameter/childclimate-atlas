@@ -892,12 +892,19 @@ let tableSortKey = "risk_score";
 let tableSortAsc = false;
 let tableSearchText = "";
 
+// The overlay shell (header + empty table skeleton) is built once on open.
+// Every subsequent search keystroke / sort click only rewrites the tbody
+// and the subtitle — the <input> stays mounted, so the cursor and
+// selection are preserved, and there's no flicker.
 function openDataTable() {
   const overlay = document.createElement("div");
   overlay.id = "data-overlay";
-  overlay.innerHTML = buildTableHTML();
+  overlay.innerHTML = buildOverlayShell();
   document.body.appendChild(overlay);
-  wireTableEvents(overlay);
+  wireOverlayShellEvents(overlay);
+  updateTableContents(overlay);
+  // Focus the search input on open (safe — it's a fresh mount, not a re-render)
+  overlay.querySelector("#table-search").focus();
 }
 
 function closeDataTable() {
@@ -905,8 +912,7 @@ function closeDataTable() {
   if (el) el.remove();
 }
 
-function buildTableHTML() {
-  const features = getTableFeatures();
+function buildOverlayShell() {
   const country = currentData?.metadata?.country || "";
   const state = activeFilters.state || "All Regions";
   return `
@@ -914,11 +920,11 @@ function buildTableHTML() {
     <div class="overlay-panel">
       <div class="overlay-header">
         <div>
-          <h2>All Facilities — ${country} ${state !== "All Regions" ? "/ " + state : ""}</h2>
-          <p class="overlay-subtitle">${features.length} facilities | Sorted by ${tableSortKey.replace(/_/g, " ")} ${tableSortAsc ? "\u2191" : "\u2193"}</p>
+          <h2>All Facilities — ${country}${state !== "All Regions" ? " / " + state : ""}</h2>
+          <p class="overlay-subtitle"></p>
         </div>
         <div class="overlay-controls">
-          <input type="text" id="table-search" placeholder="Search table\u2026" value="${tableSearchText}" />
+          <input type="text" id="table-search" placeholder="Search table\u2026" autocomplete="off" />
           <button class="btn" id="btn-close-overlay">\u2715 Close</button>
         </div>
       </div>
@@ -934,26 +940,60 @@ function buildTableHTML() {
               <th>Action</th>
             </tr>
           </thead>
-          <tbody>
-            ${features.map((f, i) => {
-              const p = f.properties;
-              const s = p.risk_score;
-              const drivers = typeof p.top_drivers === "string" ? JSON.parse(p.top_drivers) : (p.top_drivers || []);
-              const recs = typeof p.recommendations === "string" ? JSON.parse(p.recommendations) : (p.recommendations || []);
-              return `<tr data-id="${p.id}">
-                <td>${i + 1}</td>
-                <td class="name-cell" title="${displayName(f)}">${typeIcon(p.facility_type)} ${displayName(f)}</td>
-                <td>${p.facility_type}</td>
-                <td><span class="table-badge ${band(s)}">${s.toFixed(0)}</span></td>
-                <td>${(drivers[0] || "").replace(/_/g, " ")}</td>
-                <td>${recs.length ? recs[0].title : "\u2014"}</td>
-              </tr>`;
-            }).join("")}
-          </tbody>
+          <tbody></tbody>
         </table>
       </div>
     </div>
   `;
+}
+
+// Surgically update only the rows + subtitle + sort indicators.
+// Does NOT touch the search input or the header — preserves cursor & focus.
+function updateTableContents(overlay) {
+  const features = getTableFeatures();
+
+  // 1. Subtitle — "N facilities · Sorted by risk score ↓"
+  const sub = overlay.querySelector(".overlay-subtitle");
+  if (sub) {
+    const dirArrow = tableSortAsc ? "\u2191" : "\u2193";
+    sub.textContent = `${features.length.toLocaleString()} facilities \u00b7 Sorted by ${tableSortKey.replace(/_/g, " ")} ${dirArrow}`;
+  }
+
+  // 2. Visible sort indicator on the column headers
+  overlay.querySelectorAll("th.sortable").forEach(th => {
+    th.classList.toggle("sorted", th.dataset.sort === tableSortKey);
+    th.classList.toggle("asc", th.dataset.sort === tableSortKey && tableSortAsc);
+  });
+
+  // 3. Table body — the only big DOM mutation per update
+  const tbody = overlay.querySelector("tbody");
+  if (!tbody) return;
+  tbody.innerHTML = features.map((f, i) => {
+    const p = f.properties;
+    const s = p.risk_score;
+    const drivers = typeof p.top_drivers === "string" ? JSON.parse(p.top_drivers) : (p.top_drivers || []);
+    const recs = typeof p.recommendations === "string" ? JSON.parse(p.recommendations) : (p.recommendations || []);
+    return `<tr data-id="${p.id}">
+      <td>${i + 1}</td>
+      <td class="name-cell" title="${displayName(f).replace(/"/g, '&quot;')}">${typeIcon(p.facility_type)} ${displayName(f)}</td>
+      <td>${p.facility_type}</td>
+      <td><span class="table-badge ${band(s)}">${s.toFixed(0)}</span></td>
+      <td>${(drivers[0] || "").replace(/_/g, " ")}</td>
+      <td>${recs.length ? recs[0].title : "\u2014"}</td>
+    </tr>`;
+  }).join("");
+
+  // 4. Re-wire row click listeners (rows are freshly minted each update)
+  tbody.querySelectorAll("tr[data-id]").forEach(tr => {
+    tr.addEventListener("click", () => {
+      const f = filteredFeatures.find(ff => ff.properties.id === tr.dataset.id);
+      if (!f) return;
+      closeDataTable();
+      map.flyTo({ center: f.geometry.coordinates, zoom: 13 });
+      highlightFacility(f);
+      renderDetail(f);
+    });
+  });
 }
 
 function getTableFeatures() {
@@ -981,40 +1021,31 @@ function getTableFeatures() {
   return feats;
 }
 
-function wireTableEvents(overlay) {
+// Wire events that belong to the SHELL — the permanent elements that stay
+// mounted across updates (input, close button, backdrop, sort headers).
+// These handlers are attached once on open, so cursor state isn't affected
+// by updates.
+function wireOverlayShellEvents(overlay) {
   overlay.querySelector("#btn-close-overlay").addEventListener("click", closeDataTable);
   overlay.querySelector(".overlay-backdrop").addEventListener("click", closeDataTable);
-  overlay.querySelector("#table-search").addEventListener("input", e => {
+
+  const input = overlay.querySelector("#table-search");
+  input.addEventListener("input", (e) => {
     tableSearchText = e.target.value;
-    refreshTable();
+    updateTableContents(overlay);  // only rewrites tbody; input stays focused
   });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeDataTable();
+  });
+
   overlay.querySelectorAll("th.sortable").forEach(th => {
     th.addEventListener("click", () => {
       const key = th.dataset.sort;
       if (tableSortKey === key) tableSortAsc = !tableSortAsc;
       else { tableSortKey = key; tableSortAsc = key === "name"; }
-      refreshTable();
+      updateTableContents(overlay);  // tbody + subtitle + sort-indicator classes
     });
   });
-  overlay.querySelectorAll("tr[data-id]").forEach(tr => {
-    tr.addEventListener("click", () => {
-      const f = filteredFeatures.find(ff => ff.properties.id === tr.dataset.id);
-      if (f) {
-        closeDataTable();
-        map.flyTo({ center: f.geometry.coordinates, zoom: 13 });
-        highlightFacility(f);
-        renderDetail(f);
-      }
-    });
-  });
-}
-
-function refreshTable() {
-  const overlay = document.getElementById("data-overlay");
-  if (!overlay) return;
-  overlay.innerHTML = buildTableHTML();
-  wireTableEvents(overlay);
-  overlay.querySelector("#table-search").focus();
 }
 
 // ---- export ----
