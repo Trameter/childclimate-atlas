@@ -1,19 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Theme-aware favicon.
-  The outer ring flips color based on the user's browser/OS theme:
-    - light theme → ink (dark) stroke, readable on white tabs
-    - dark theme  → paper (light) stroke, readable on dark tabs
-  The ember dot stays the same; it reads fine on both.
-  Using the original 76-unit coords from the SVG mark in index.html.
+  Favicon.
+  Both the ring and the accent dot use ember (#C96A3F) so the mark stays
+  readable on every possible tab background (white, light gray, dark gray,
+  black). Theme-aware SVG favicons via prefers-color-scheme are unreliable
+  in Safari (it picks the dark branch based on the OS setting, not the tab
+  chrome, leaving the stroke invisible on light tabs) so we avoid the
+  theme switch entirely. Ember against any neutral keeps contrast.
+  Coords mirror the logo mark in index.html.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 76 76" role="img" aria-label="ChildClimate Atlas">
-  <style>
-    .ring { stroke: #1E2433; }
-    @media (prefers-color-scheme: dark) {
-      .ring { stroke: #FAF8F4; }
-    }
-  </style>
-  <circle class="ring" cx="38" cy="38" r="34" fill="none" stroke-width="2.25"/>
-  <circle cx="38" cy="22" r="5.2" fill="#C96A3F"/>
+  <circle cx="38" cy="38" r="34" fill="none" stroke="#C96A3F" stroke-width="2.5"/>
+  <circle cx="38" cy="22" r="5.4" fill="#C96A3F"/>
 </svg>
