@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Theme-aware favicon.
+  The outer ring flips color based on the user's browser/OS theme:
+    - light theme → ink (dark) stroke, readable on white tabs
+    - dark theme  → paper (light) stroke, readable on dark tabs
+  The ember dot stays the same; it reads fine on both.
+  Using the original 76-unit coords from the SVG mark in index.html.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 76 76" role="img" aria-label="ChildClimate Atlas">
+  <style>
+    .ring { stroke: #1E2433; }
+    @media (prefers-color-scheme: dark) {
+      .ring { stroke: #FAF8F4; }
+    }
+  </style>
+  <circle class="ring" cx="38" cy="38" r="34" fill="none" stroke-width="2.25"/>
+  <circle cx="38" cy="22" r="5.2" fill="#C96A3F"/>
+</svg>
