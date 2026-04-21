@@ -556,6 +556,29 @@ body:not(.has-detail) .side-r { border-left-color: transparent; }
   color: var(--ink);
   font-weight: 500;
 }
+/* Full-width primary action variant (e.g. "Flag a missing facility" link in
+   the Contribute pane). Uses the same .act base styling but spans the row
+   and renders as an anchor with hover affordance. */
+.act.act-primary {
+  display: flex;
+  width: 100%;
+  padding: 11px 10px;
+  text-decoration: none;
+  color: var(--paper);
+  border-color: var(--paper-soft);
+}
+.act.act-primary:hover {
+  background: var(--ember);
+  border-color: var(--ember);
+  color: var(--ink);
+}
+/* Helper copy inside a side pane — sits between the heading and the CTA. */
+.pane-copy {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--paper-mute);
+}
 
 /* =========================================================================
    MAP (center)
