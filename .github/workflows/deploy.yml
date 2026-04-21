@@ -15,12 +15,20 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
+    # Force any JS action that still declares node20 to run on node24.
+    # GitHub is making this the default on 2026-06-02; setting it now
+    # silences the deprecation warning and future-proofs the workflow.
+    # Can be dropped once SamKirkland/FTP-Deploy-Action publishes a
+    # release that declares `using: "node24"`.
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Deploy web/ to Namecheap via FTPS
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.6
         with:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
