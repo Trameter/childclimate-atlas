@@ -904,6 +904,238 @@ body.has-detail #detail.detail {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* =========================================================================
+   "View all" button (under the top-critical list)
+   ========================================================================= */
+.view-all {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: transparent;
+  color: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.view-all:hover {
+  background: var(--ink-2);
+  border-color: var(--ember);
+  color: var(--ember);
+}
+.view-all .chev {
+  font-family: "JetBrains Mono", monospace;
+  opacity: 0.7;
+  transition: transform 0.12s, opacity 0.12s;
+}
+.view-all:hover .chev { transform: translateX(2px); opacity: 1; }
+
+/* =========================================================================
+   FULL-SCREEN DATA TABLE OVERLAY
+   Opened by the "View all" button — searchable, sortable table of every
+   facility in the current filter scope.
+   ========================================================================= */
+#data-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  animation: overlay-in 160ms ease-out;
+}
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 14, 22, 0.78);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.overlay-panel {
+  position: relative;
+  margin: 40px;
+  background: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1280px;
+  max-height: calc(100vh - 80px);
+  overflow: hidden;
+  animation: panel-in 180ms ease-out;
+}
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.overlay-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 20px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--rule);
+  flex-wrap: wrap;
+}
+.overlay-header h2 {
+  margin: 0;
+  font-family: "Inter Tight";
+  font-weight: 500;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+  color: var(--paper);
+}
+.overlay-subtitle {
+  margin: 4px 0 0;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--paper-soft);
+}
+.overlay-controls {
+  display: flex; align-items: center; gap: 10px;
+}
+.overlay-controls #table-search {
+  background: var(--ink-2);
+  color: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  min-width: 240px;
+  outline: 0;
+  transition: border-color 0.12s;
+}
+.overlay-controls #table-search:focus { border-color: var(--paper-soft); }
+.overlay-controls #table-search::placeholder { color: var(--paper-soft); }
+
+#btn-close-overlay {
+  padding: 8px 12px;
+  background: transparent;
+  color: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+#btn-close-overlay:hover {
+  background: var(--ink-2);
+  border-color: var(--paper-soft);
+}
+
+/* Table */
+.overlay-table-wrap {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--paper);
+}
+.data-table thead {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--ink-2);
+}
+.data-table th {
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--rule);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--paper-mute);
+  font-weight: 500;
+  user-select: none;
+  white-space: nowrap;
+}
+.data-table th.sortable {
+  cursor: pointer;
+  transition: color 0.12s;
+}
+.data-table th.sortable:hover { color: var(--paper); }
+.data-table td {
+  padding: 11px 16px;
+  border-bottom: 1px solid rgba(40, 48, 74, 0.4);
+  vertical-align: middle;
+}
+.data-table tr[data-id] {
+  cursor: pointer;
+  transition: background 0.08s;
+}
+.data-table tr[data-id]:hover { background: var(--ink-2); }
+.data-table .name-cell {
+  max-width: 360px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+.data-table td:nth-child(3) { /* Type */
+  text-transform: capitalize;
+  color: var(--paper-mute);
+  font-size: 12px;
+}
+.data-table td:nth-child(5),  /* Top driver */
+.data-table td:nth-child(6) { /* Action */
+  color: var(--paper-mute);
+  font-size: 12px;
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.data-table td:first-child { /* row number */
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: var(--paper-soft);
+  width: 48px;
+}
+
+.table-badge {
+  display: inline-flex;
+  align-items: center; justify-content: center;
+  min-width: 40px;
+  padding: 3px 8px;
+  border-radius: 2px;
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  border: 1px solid currentColor;
+}
+.table-badge.low    { color: var(--low); }
+.table-badge.mid    { color: var(--mod); }
+.table-badge.high   { color: var(--high); }
+.table-badge.severe { color: var(--sev); }
+
+/* Responsive overlay */
+@media (max-width: 820px) {
+  .overlay-panel { margin: 0; max-height: 100vh; border-radius: 0; }
+  .overlay-header { flex-direction: column; align-items: stretch; }
+  .overlay-controls { width: 100%; }
+  .overlay-controls #table-search { flex: 1; min-width: 0; }
+  .data-table .name-cell { max-width: 200px; }
+  .data-table td:nth-child(5), .data-table td:nth-child(6) { display: none; }
+}
+
+/* =========================================================================
    FOOTER
    ========================================================================= */
 footer {

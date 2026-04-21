@@ -851,14 +851,25 @@ function renderTopList() {
   const host = document.getElementById("top-list");
   if (!sorted.length) { host.innerHTML = '<div style="color:var(--paper-soft);font-size:12px;padding:6px 0">No facilities match the current filters.</div>'; return; }
 
-  host.innerHTML = sorted.map(f => {
-    const p = f.properties; const s = p.risk_score;
-    return `<div class="crit-row" data-id="${p.id}">
-      <span class="d" style="background:${bandColor(s)}"></span>
-      <span class="n" title="${displayName(f).replace(/"/g, '&quot;')}">${displayName(f)}</span>
-      <span class="s">${s.toFixed(0)}</span>
-    </div>`;
-  }).join("");
+  const totalCount = filteredFeatures.length;
+  const moreCount = Math.max(0, totalCount - sorted.length);
+
+  host.innerHTML = `
+    ${sorted.map(f => {
+      const p = f.properties; const s = p.risk_score;
+      return `<div class="crit-row" data-id="${p.id}">
+        <span class="d" style="background:${bandColor(s)}"></span>
+        <span class="n" title="${displayName(f).replace(/"/g, '&quot;')}">${displayName(f)}</span>
+        <span class="s">${s.toFixed(0)}</span>
+      </div>`;
+    }).join("")}
+    ${moreCount > 0 ? `
+      <button type="button" class="view-all" id="btn-view-all">
+        View all ${totalCount.toLocaleString()} facilities
+        <span class="chev" aria-hidden="true">→</span>
+      </button>
+    ` : ""}
+  `;
 
   host.querySelectorAll(".crit-row").forEach(el => {
     el.addEventListener("click", () => {
@@ -871,6 +882,9 @@ function renderTopList() {
       renderDetail(f);
     });
   });
+
+  const viewAllBtn = host.querySelector("#btn-view-all");
+  if (viewAllBtn) viewAllBtn.addEventListener("click", openDataTable);
 }
 
 // ---- full-screen data table ----
