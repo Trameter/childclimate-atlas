@@ -2,8 +2,7 @@
 # Namecheap LiteSpeed / Apache-compatible config for climate-atlas.trameter.com
 # ==========================================================================
 
-# ----- 1. Correct MIME types (LiteSpeed/Apache fall back to octet-stream
-#         for unknown extensions, which also disables compression).
+# ----- 1. Correct MIME types
 <IfModule mod_mime.c>
   AddType application/geo+json        .geojson
   AddType image/svg+xml                .svg
@@ -12,13 +11,39 @@
   AddType application/javascript       .js
 </IfModule>
 
-# ----- 2. Force UTF-8 on text responses
 AddDefaultCharset UTF-8
 
-# ----- 3. Compression: gzip/deflate for every compressible text format.
-#         This is the single biggest win for Bangladesh (21 MB → 0.6 MB).
+# ----- 2. Pre-compressed GeoJSON delivery
+# LiteSpeed's on-the-fly compression isn't reliably active for large text
+# files on this plan, so we ship pre-gzipped companions and serve them
+# transparently when the client supports it. Net: BGD 18.9 MB -> 0.6 MB
+# on the wire, no JS changes needed.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # If client accepts gzip AND foo.geojson.gz exists on disk,
+  # rewrite the request to that file.
+  RewriteCond %{HTTP:Accept-Encoding} gzip
+  RewriteCond %{REQUEST_FILENAME}.gz -f
+  RewriteRule ^(.+\.geojson)$ $1.gz [L]
+</IfModule>
+
+# Mark .geojson.gz files correctly so the browser auto-decompresses them
+# and treats the payload as GeoJSON.
+<FilesMatch "\.geojson\.gz$">
+  <IfModule mod_headers.c>
+    Header set Content-Encoding gzip
+    Header append Vary Accept-Encoding
+    Header set Content-Type "application/geo+json; charset=utf-8"
+    Header set Cache-Control "public, max-age=3600"
+  </IfModule>
+  # Defensive: in case .gz is requested directly
+  ForceType application/geo+json
+</FilesMatch>
+
+# ----- 3. Also try on-the-fly compression (harmless if the module is off,
+# covers CSS/JS/HTML that we haven't pre-compressed)
 <IfModule mod_deflate.c>
-  # By MIME type
   AddOutputFilterByType DEFLATE \
     application/json \
     application/geo+json \
@@ -30,49 +55,33 @@ AddDefaultCharset UTF-8
     text/javascript \
     text/plain \
     text/xml
-
-  # Belt-and-braces: force compression by extension for common text files,
-  # in case a MIME mismatch would otherwise skip it.
-  <FilesMatch "\.(geojson|json|css|js|svg|html|txt|xml)$">
-    SetOutputFilter DEFLATE
-  </FilesMatch>
-
-  # NEVER compress already-compressed formats
+  # Never compress already-compressed formats
   SetEnvIfNoCase Request_URI \.(?:woff2|png|jpg|jpeg|gif|webp|pdf|zip|gz)$ no-gzip dont-vary
 </IfModule>
 
-# ----- 4. Cache headers — aggressive for immutable assets, short for data.
+# ----- 4. Cache headers — per asset type
 <IfModule mod_headers.c>
-  # CSS / JS / fonts / images — safe to cache for a week since a redeploy
-  # always replaces them with fresh bytes at the same URL.
+  # CSS / JS / images — 1 week
   <FilesMatch "\.(css|js|svg|png|jpg|jpeg|webp|ico)$">
     Header set Cache-Control "public, max-age=604800"
   </FilesMatch>
+  # Fonts — 30 days, immutable
   <FilesMatch "\.woff2$">
     Header set Cache-Control "public, max-age=2592000, immutable"
   </FilesMatch>
-
-  # GeoJSON data — cache for 1 hour so repeated page loads don't re-download
+  # Plain GeoJSON (fallback for non-gzip clients) — 1 hour
   <FilesMatch "\.geojson$">
     Header set Cache-Control "public, max-age=3600"
     Header append Vary "Accept-Encoding"
   </FilesMatch>
-
-  # Never cache index.html (so redeploys are picked up instantly)
+  # HTML — never cache, so redeploys land instantly
   <FilesMatch "\.html$">
     Header set Cache-Control "no-cache, no-store, must-revalidate"
   </FilesMatch>
 </IfModule>
 
-# ----- 5. Security headers (cheap wins for a public site)
+# ----- 5. Security headers
 <IfModule mod_headers.c>
   Header set X-Content-Type-Options "nosniff"
   Header set Referrer-Policy "strict-origin-when-cross-origin"
-</IfModule>
-
-# ----- 6. Pretty URLs — strip trailing index.html from any nested folder
-#         (nice to have, currently unused but harmless).
-<IfModule mod_rewrite.c>
-  RewriteEngine On
-  RewriteRule ^(.*)/index\.html$ /$1/ [R=301,L]
 </IfModule>
