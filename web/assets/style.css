@@ -1047,7 +1047,20 @@ body.has-detail #detail.detail {
   font-family: inherit;
   font-size: 13px;
   color: var(--paper);
+  /* Lock column widths so header + body columns don't recompute as rows
+     change during search / sort. Without table-layout:fixed the browser
+     uses auto-layout and every keystroke visually shifts the header
+     alignment (e.g. the space between "#" and "Facility" drifts). */
+  table-layout: fixed;
 }
+/* Explicit per-column widths. With table-layout:fixed, the first row's
+   widths determine the layout, so we pin them on the <th>. */
+.data-table th:nth-child(1) { width: 56px; }   /* # */
+.data-table th:nth-child(2) { width: auto; }   /* Facility (flex remainder) */
+.data-table th:nth-child(3) { width: 104px; }  /* Type */
+.data-table th:nth-child(4) { width: 88px; }   /* Score */
+.data-table th:nth-child(5) { width: 28%; }    /* Top Driver */
+.data-table th:nth-child(6) { width: 22%; }    /* Action */
 .data-table thead {
   position: sticky; top: 0; z-index: 2;
   background: var(--ink-2);
@@ -1116,7 +1129,7 @@ body.has-detail #detail.detail {
   font-family: "JetBrains Mono", monospace;
   font-size: 11px;
   color: var(--paper-soft);
-  width: 48px;
+  /* width is set on the <th> above (table-layout:fixed uses header row) */
 }
 
 .table-badge {
