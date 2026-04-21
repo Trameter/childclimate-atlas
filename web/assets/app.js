@@ -114,22 +114,76 @@ let filteredFeatures = [];
 let activeFilters = { types: new Set(["clinic", "hospital", "school"]), bands: new Set(["low", "mid", "high", "severe"]), search: "", state: "", searchType: "" };
 
 // ---- data loading ----
-// In-memory cache keyed by ISO3 so a country is fetched at most once per
-// session. Combined with the browser's HTTP cache (we no longer set
-// cache:"no-store"), switching BACK to a country you've already viewed is
-// instant and cold country-switches only pay the download cost the first
-// time they happen.
+// In-memory cache + browser HTTP cache + background prefetch.
+// Also: stream the response body so the user sees live progress instead of
+// staring at a frozen "Loading…" label for Bangladesh's 20 MB file.
 const dataCache = new Map();
-const inflight = new Map(); // dedupe concurrent requests for the same country
+const inflight = new Map();
 
-async function loadAtlas(iso3) {
+// Ballpark uncompressed sizes (used only when the server sends a compressed
+// Content-Length, which reports the COMPRESSED byte count and would make
+// %-progress overshoot). These are approximate; off-by-10% is fine because
+// the progress bar gets clamped to 100%.
+const APPROX_UNCOMPRESSED_BYTES = {
+  NGA: 11_000_000,
+  BGD: 20_000_000,
+  GTM:  2_700_000,
+};
+
+function onLoadProgress(iso3, received, total) {
+  const name = COUNTRY_NAMES[iso3] || iso3;
+  const chipText = document.getElementById("facility-chip-text");
+  const hudC = document.getElementById("hud-country");
+  if (received === 0 && total === 0) return; // finished / reset
+  const mb = (received / 1024 / 1024).toFixed(1);
+  let msg;
+  if (total) {
+    const pct = Math.min(100, Math.round((received / total) * 100));
+    msg = `${name} · loading ${pct}%`;
+  } else {
+    msg = `${name} · loading ${mb} MB`;
+  }
+  if (chipText) chipText.textContent = msg;
+  if (hudC) hudC.textContent = msg;
+}
+
+async function loadAtlas(iso3, { showProgress = false } = {}) {
   if (dataCache.has(iso3)) return dataCache.get(iso3);
   if (inflight.has(iso3)) return inflight.get(iso3);
+
   const p = (async () => {
     try {
       const r = await fetch(`./data/${iso3}.geojson`);
       if (!r.ok) throw new Error(r.status);
-      const data = await r.json();
+
+      // If the server is sending gzipped content, the Content-Length header
+      // reports compressed size while the reader yields decompressed bytes.
+      // Detect that case and use our approximate uncompressed size instead.
+      const encoded = (r.headers.get("content-encoding") || "").toLowerCase();
+      const clHeader = Number(r.headers.get("content-length")) || 0;
+      const total = (encoded && (encoded.includes("gzip") || encoded.includes("br") || encoded.includes("deflate")))
+        ? (APPROX_UNCOMPRESSED_BYTES[iso3] || 0)
+        : clHeader;
+
+      // Stream to drive the progress indicator.
+      const reader = r.body.getReader();
+      const chunks = [];
+      let received = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        if (showProgress) onLoadProgress(iso3, received, total);
+      }
+
+      // Reassemble and parse.
+      const blob = new Uint8Array(received);
+      let pos = 0;
+      for (const c of chunks) { blob.set(c, pos); pos += c.length; }
+      const text = new TextDecoder("utf-8").decode(blob);
+      const data = JSON.parse(text);
+
       dataCache.set(iso3, data);
       return data;
     } catch {
@@ -138,6 +192,7 @@ async function loadAtlas(iso3) {
       inflight.delete(iso3);
     }
   })();
+
   inflight.set(iso3, p);
   return p;
 }
@@ -151,8 +206,8 @@ function prefetchOtherCountries(currentIso3) {
   prefetchedOthers = true;
   ["NGA", "BGD", "GTM"].forEach(iso3 => {
     if (iso3 === currentIso3 || dataCache.has(iso3)) return;
-    // Fire-and-forget; ignore errors, don't block UI.
-    loadAtlas(iso3).catch(() => {});
+    // Silent background prefetch — no UI progress updates.
+    loadAtlas(iso3, { showProgress: false }).catch(() => {});
   });
 }
 
@@ -1035,8 +1090,8 @@ async function switchCountry(iso3) {
   // Start the map fly animation immediately
   map.flyTo({ center: v.center, zoom: v.zoom });
 
-  // --- 2. ASYNC DATA FETCH -----------------------------------------------
-  const data = await loadAtlas(iso3);
+  // --- 2. ASYNC DATA FETCH (with streaming progress) ---------------------
+  const data = await loadAtlas(iso3, { showProgress: true });
   currentData = data;
   allFeatures = data.features || [];
 

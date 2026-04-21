@@ -1,0 +1,78 @@
+# ==========================================================================
+# Namecheap LiteSpeed / Apache-compatible config for climate-atlas.trameter.com
+# ==========================================================================
+
+# ----- 1. Correct MIME types (LiteSpeed/Apache fall back to octet-stream
+#         for unknown extensions, which also disables compression).
+<IfModule mod_mime.c>
+  AddType application/geo+json        .geojson
+  AddType image/svg+xml                .svg
+  AddType font/woff2                   .woff2
+  AddType text/css                     .css
+  AddType application/javascript       .js
+</IfModule>
+
+# ----- 2. Force UTF-8 on text responses
+AddDefaultCharset UTF-8
+
+# ----- 3. Compression: gzip/deflate for every compressible text format.
+#         This is the single biggest win for Bangladesh (21 MB → 0.6 MB).
+<IfModule mod_deflate.c>
+  # By MIME type
+  AddOutputFilterByType DEFLATE \
+    application/json \
+    application/geo+json \
+    application/javascript \
+    application/xml \
+    image/svg+xml \
+    text/css \
+    text/html \
+    text/javascript \
+    text/plain \
+    text/xml
+
+  # Belt-and-braces: force compression by extension for common text files,
+  # in case a MIME mismatch would otherwise skip it.
+  <FilesMatch "\.(geojson|json|css|js|svg|html|txt|xml)$">
+    SetOutputFilter DEFLATE
+  </FilesMatch>
+
+  # NEVER compress already-compressed formats
+  SetEnvIfNoCase Request_URI \.(?:woff2|png|jpg|jpeg|gif|webp|pdf|zip|gz)$ no-gzip dont-vary
+</IfModule>
+
+# ----- 4. Cache headers — aggressive for immutable assets, short for data.
+<IfModule mod_headers.c>
+  # CSS / JS / fonts / images — safe to cache for a week since a redeploy
+  # always replaces them with fresh bytes at the same URL.
+  <FilesMatch "\.(css|js|svg|png|jpg|jpeg|webp|ico)$">
+    Header set Cache-Control "public, max-age=604800"
+  </FilesMatch>
+  <FilesMatch "\.woff2$">
+    Header set Cache-Control "public, max-age=2592000, immutable"
+  </FilesMatch>
+
+  # GeoJSON data — cache for 1 hour so repeated page loads don't re-download
+  <FilesMatch "\.geojson$">
+    Header set Cache-Control "public, max-age=3600"
+    Header append Vary "Accept-Encoding"
+  </FilesMatch>
+
+  # Never cache index.html (so redeploys are picked up instantly)
+  <FilesMatch "\.html$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+  </FilesMatch>
+</IfModule>
+
+# ----- 5. Security headers (cheap wins for a public site)
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# ----- 6. Pretty URLs — strip trailing index.html from any nested folder
+#         (nice to have, currently unused but harmless).
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^(.*)/index\.html$ /$1/ [R=301,L]
+</IfModule>
