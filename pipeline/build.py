@@ -15,6 +15,7 @@ from typing import Dict, List
 
 from .config import load_country, CountryConfig, PROCESSED_DIR
 from .sources import facilities as facilities_src
+from .sources import grid3 as grid3_src
 from .sources import climate as climate_src
 from .sources import air_quality as air_src
 from .sources import geocode as geocode_src
@@ -48,6 +49,17 @@ def _to_geojson(scored: List[Dict], country: CountryConfig) -> Dict:
                 "air": f.get("air", {}),
             },
         })
+    # Build the source attribution list based on which sources contributed
+    # facilities — consumers (web UI, README, PDF report) can read this to
+    # show proper credit. Always includes OSM; GRID3 appended when present.
+    sources_used = ["OpenStreetMap (ODbL)"]
+    if any(f.get("properties", {}).get("tags", {}).get("source") == "grid3"
+           for f in features):
+        sources_used.append(
+            "GRID3 NGA Health Facilities v2.0 "
+            "(CIESIN / Columbia University, CC BY 4.0, "
+            "https://doi.org/10.7916/kv1n-0743)"
+        )
     return {
         "type": "FeatureCollection",
         "metadata": {
@@ -58,7 +70,8 @@ def _to_geojson(scored: List[Dict], country: CountryConfig) -> Dict:
             "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "facility_count": len(features),
             "scoring_weights": country.scoring_weights,
-            "pipeline_version": "0.1.0",
+            "pipeline_version": "0.2.0",
+            "facility_sources": sources_used,
         },
         "features": features,
     }
@@ -76,7 +89,27 @@ def build(iso3: str, limit: int | None = None, fresh: bool = False, full: bool =
 
     _log("Fetching facilities from OSM Overpass...")
     all_facilities = facilities_src.fetch(config, cache=not fresh)
-    _log(f"  got {len(all_facilities)} facilities (clinics + hospitals + schools)")
+    _log(f"  got {len(all_facilities)} facilities from OSM (clinics + hospitals + schools)")
+
+    # Optional: merge GRID3 Nigeria Health Facilities v2.0 (CC BY 4.0).
+    # OSM coverage of Nigerian PHCs is uneven (e.g. urban Kano gaps); the
+    # NHFR 2024 + GRID3 dataset adds ~47k GPS-validated health facilities.
+    # Spatial dedup drops GRID3 records that sit within 150m of an
+    # existing OSM entry, so we don't double-count.
+    if config.sources.get("grid3"):
+        _log("Fetching GRID3 Nigeria Health Facilities v2.0 (CIESIN / CC BY 4.0)...")
+        grid3_facilities = grid3_src.fetch(config, cache=not fresh)
+        _log(f"  got {len(grid3_facilities)} health facilities from GRID3")
+        if grid3_facilities:
+            before_dedup = len(grid3_facilities)
+            grid3_facilities = grid3_src.dedup_against_osm(
+                grid3_facilities, all_facilities, proximity_m=150.0
+            )
+            dropped = before_dedup - len(grid3_facilities)
+            _log(f"  deduped: dropped {dropped} GRID3 records within 150m of an OSM entry")
+            _log(f"  merging {len(grid3_facilities)} net-new facilities")
+            all_facilities = all_facilities + grid3_facilities
+            _log(f"  combined total: {len(all_facilities)} facilities")
 
     if limit:
         all_facilities = all_facilities[:limit]

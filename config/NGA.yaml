@@ -31,6 +31,9 @@ sources:
   open_meteo: true          # ERA5 climate data
   air_quality: true         # Sentinel-5P / CAMS air quality proxy
   worldpop: false           # WorldPop child density (large files — enable in prod)
+  grid3: true               # GRID3 NGA Health Facilities v2.0 — CC BY 4.0
+                            # Adds ~43k NHFR 2024 PHCs missing from OSM.
+                            # Nigeria-only; grid3_src.fetch() is a no-op elsewhere.
 
 # Scoring weights — sum to 1.0
 # These are tuned heuristically for the prototype; the model supports
