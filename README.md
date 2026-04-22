@@ -76,12 +76,15 @@ open web/index.html
 
 | Layer | Source | Licence |
 |---|---|---|
-| Health facilities | [Healthsites.io](https://healthsites.io) / OSM | ODbL |
+| Health facilities (Nigeria) | [GRID3 NGA Health Facilities v2.0](https://doi.org/10.7916/kv1n-0743) (CIESIN / Columbia University, incorporates NHFR 2024) | CC BY 4.0 |
+| Health facilities (other) | [Healthsites.io](https://healthsites.io) / OSM | ODbL |
 | Schools | [GIGA](https://projectconnect.unicef.org) / OSM | ODbL |
 | Heat, flood, drought | [Open-Meteo](https://open-meteo.com) / ERA5 | CC-BY |
 | Air quality (PM2.5, NO₂) | [Sentinel-5P](https://sentinel.esa.int) via Copernicus | Open |
 | Child population | [WorldPop](https://www.worldpop.org) | CC-BY |
 | Roads / access | [OpenStreetMap](https://www.openstreetmap.org) | ODbL |
+
+**Nigeria facilities cite:** Center for Integrated Earth System Information (CIESIN), Columbia University. 2024. *GRID3 NGA — Health Facilities v2.0*. New York: GRID3. [https://doi.org/10.7916/kv1n-0743](https://doi.org/10.7916/kv1n-0743).
 
 ## Architecture
 

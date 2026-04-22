@@ -949,14 +949,25 @@ function buildOverlayShell() {
 
 // Surgically update only the rows + subtitle + sort indicators.
 // Does NOT touch the search input or the header — preserves cursor & focus.
+const TABLE_MAX_ROWS = 1000;  // Cap DOM nodes so 50k-facility countries stay snappy.
+
 function updateTableContents(overlay) {
   const features = getTableFeatures();
+  // Cap the rendered rows — at full Nigeria scale (~50k facilities) dropping
+  // all rows into the DOM causes 2-5s jank on every search keystroke. The
+  // features are already sorted by the active key, so the truncated slice
+  // is always "the most relevant N for the current sort direction."
+  const truncated = features.length > TABLE_MAX_ROWS;
+  const rendered = truncated ? features.slice(0, TABLE_MAX_ROWS) : features;
 
   // 1. Subtitle — "N facilities · Sorted by risk score ↓"
   const sub = overlay.querySelector(".overlay-subtitle");
   if (sub) {
     const dirArrow = tableSortAsc ? "\u2191" : "\u2193";
-    sub.textContent = `${features.length.toLocaleString()} facilities \u00b7 Sorted by ${tableSortKey.replace(/_/g, " ")} ${dirArrow}`;
+    const shownNote = truncated
+      ? ` \u00b7 showing top ${TABLE_MAX_ROWS.toLocaleString()} of ${features.length.toLocaleString()}`
+      : "";
+    sub.textContent = `${features.length.toLocaleString()} facilities \u00b7 Sorted by ${tableSortKey.replace(/_/g, " ")} ${dirArrow}${shownNote}`;
   }
 
   // 2. Visible sort indicator on the column headers
@@ -968,7 +979,7 @@ function updateTableContents(overlay) {
   // 3. Table body — the only big DOM mutation per update
   const tbody = overlay.querySelector("tbody");
   if (!tbody) return;
-  tbody.innerHTML = features.map((f, i) => {
+  tbody.innerHTML = rendered.map((f, i) => {
     const p = f.properties;
     const s = p.risk_score;
     const drivers = typeof p.top_drivers === "string" ? JSON.parse(p.top_drivers) : (p.top_drivers || []);

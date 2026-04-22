@@ -21,10 +21,18 @@ credentials.json
 token.json
 
 # Pipeline intermediate artefacts (raw + per-country processed).
-# The production GeoJSONs consumed by the web UI live in web/data/ and ARE committed.
+# The production GeoJSONs consumed by the web UI live in web/data/, but we
+# only commit the pre-compressed .gz companions — the raw files get large
+# (Nigeria is ~100 MB after the GRID3 merge) and would bloat git history
+# on every rebuild. The deploy and the live atlas only need the .gz; the
+# .htaccess rewrite serves it to gzip-capable clients, which is every
+# modern browser. Re-run `python3 -m pipeline.build --country XXX` to
+# regenerate the raw file locally if you need it.
 data/raw/
 data/processed/*/
 !data/processed/.gitkeep
+web/data/*.geojson
+!web/data/*.geojson.gz
 
 # Editor / tooling
 node_modules/
