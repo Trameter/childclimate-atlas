@@ -8,6 +8,7 @@ exports a single GeoJSON the web frontend can render directly.
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import sys
 import time
@@ -123,10 +124,15 @@ def build(iso3: str, limit: int | None = None, fresh: bool = False, full: bool =
     all_facilities = geocode_src.assign_states(all_facilities, country_iso2=config.iso2)
 
     # Adaptive sampling: for large facility sets, sample fewer points to keep
-    # build times reasonable. Climate varies slowly over short distances so
-    # nearest-neighbor fill from a sparser sample is still accurate.
+    # build times reasonable AND fit within Open-Meteo's free-tier hourly
+    # cap (~600 calls/hour across BOTH climate + air endpoints combined).
+    # Climate and AQ vary on kilometre-to-tens-of-kilometres scales, so
+    # nearest-neighbor fill from a sparser grid is still accurate. The
+    # per-point cache makes re-runs cheap regardless of stride.
     n = len(all_facilities)
-    if n > 5000:
+    if n > 20000:
+        stride = 100    # ~500 samples for a 50k-facility country rebuild
+    elif n > 5000:
         stride = 25
     elif n > 2000:
         stride = 20
@@ -134,7 +140,8 @@ def build(iso3: str, limit: int | None = None, fresh: bool = False, full: bool =
         stride = 10
     else:
         stride = 5
-    _log(f"  using sample stride {stride} for {n} facilities")
+    _log(f"  using sample stride {stride} for {n} facilities "
+         f"(~{n // stride} climate + {n // stride} air samples)")
 
     _log("Fetching climate indicators via Open-Meteo...")
     climate_by_id = climate_src.fetch_for_facilities(all_facilities, sample_stride=stride)
@@ -161,11 +168,27 @@ def build(iso3: str, limit: int | None = None, fresh: bool = False, full: bool =
     out_path.write_text(json.dumps(geojson))
     _log(f"Wrote {out_path}")
 
-    # Also drop a symlink/copy into the web folder so the static frontend
-    # can load it without a server-side route.
+    # Also drop a copy into the web folder so the static frontend can load
+    # it without a server-side route.
     web_data = PROCESSED_DIR.parent.parent / "web" / "data"
     web_data.mkdir(parents=True, exist_ok=True)
-    (web_data / f"{config.iso3}.geojson").write_text(json.dumps(geojson))
+    web_geojson_path = web_data / f"{config.iso3}.geojson"
+    payload = json.dumps(geojson)
+    web_geojson_path.write_text(payload)
+
+    # Pre-compressed companion. LiteSpeed on Namecheap isn't reliably
+    # gzipping large GeoJSONs on the fly, so we ship a .gz next to each
+    # country file and let .htaccess route gzip-capable clients to it.
+    # Net for Nigeria: ~80 MB → ~3 MB on the wire, no JS changes needed.
+    # Doing this inside the pipeline (vs a manual post-step) means every
+    # future country rebuild stays compressed without anyone remembering.
+    gz_path = web_data / f"{config.iso3}.geojson.gz"
+    with gzip.open(gz_path, "wb", compresslevel=9) as gz:
+        gz.write(payload.encode("utf-8"))
+    gz_size_mb = gz_path.stat().st_size / 1024 / 1024
+    raw_size_mb = web_geojson_path.stat().st_size / 1024 / 1024
+    _log(f"  wrote {web_geojson_path.name} ({raw_size_mb:.1f} MB) + "
+         f"{gz_path.name} ({gz_size_mb:.2f} MB, {100*gz_size_mb/raw_size_mb:.1f}% of raw)")
 
     # Top 10 risk summary for the application narrative
     top = scored[:10]

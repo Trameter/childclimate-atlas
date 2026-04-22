@@ -2,19 +2,44 @@
 
 We pull PM2.5 and NO2 because they're the two pollutants most strongly linked
 to child respiratory illness and school absenteeism in WHO literature.
+
+Uses the same caching + 429-aware retry pattern as climate.py —
+see that module for the full rationale.
 """
 from __future__ import annotations
 
+import json
 import time
+from pathlib import Path
 from typing import Dict, List
 
 import requests
 
+from ..config import RAW_DIR
+from .climate import RateLimited  # shared so the circuit-breaker logic matches
+
 AQ_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
-REQUEST_TIMEOUT = 20
+REQUEST_TIMEOUT = 30
+
+# Per-point cache — shared across countries for the same reason as climate.
+_CACHE_DIR = RAW_DIR / "air_quality"
+
+
+def _cache_path(lat: float, lon: float) -> Path:
+    return _CACHE_DIR / f"{lat:.2f}_{lon:.2f}.json"
 
 
 def _fetch_point(lat: float, lon: float) -> Dict:
+    cache = _cache_path(lat, lon)
+    if cache.exists():
+        try:
+            return json.loads(cache.read_text())
+        except (json.JSONDecodeError, OSError):
+            try:
+                cache.unlink()
+            except OSError:
+                pass
+
     params = {
         "latitude": lat,
         "longitude": lon,
@@ -22,14 +47,29 @@ def _fetch_point(lat: float, lon: float) -> Dict:
         "past_days": 30,
         "timezone": "UTC",
     }
+
+    last_err = "no attempts made"
     for attempt in range(3):
         try:
             resp = requests.get(AQ_URL, params=params, timeout=REQUEST_TIMEOUT)
             if resp.status_code == 200:
-                return resp.json()
+                payload = resp.json()
+                _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                cache.write_text(json.dumps(payload))
+                return payload
+            if resp.status_code == 429:
+                # Same reasoning as climate: 429 is a global condition,
+                # surface it as RateLimited so the loop-level circuit
+                # breaker pauses sampling once instead of per-point.
+                raise RateLimited()
+            last_err = f"HTTP {resp.status_code}"
             time.sleep(1 + attempt)
-        except requests.RequestException:
+        except requests.RequestException as e:
+            last_err = f"{type(e).__name__}: {e}"
             time.sleep(1 + attempt)
+    # Non-429 failure. Historical behavior returned an empty dict so the
+    # caller's _summarize could fall through cleanly. Preserve that.
+    print(f"  [air] fetch failed at {lat},{lon}: {last_err}")
     return {}
 
 
@@ -55,25 +95,57 @@ def _summarize(hourly: Dict) -> Dict[str, float]:
 
 
 def fetch_for_facilities(facilities: List[Dict], sample_stride: int = 5) -> Dict[str, Dict]:
-    """Same nearest-neighbor trick as climate.py — sample + fill."""
+    """Same nearest-neighbor trick as climate.py — sample + fill.
+
+    Progress logged every 50 points; cache hits are counted separately
+    and don't incur the polite-pacing sleep.
+    """
     if not facilities:
         return {}
 
     summaries: Dict[str, Dict] = {}
     sampled_points: List[Dict] = []
 
-    for i, f in enumerate(facilities):
-        if i % sample_stride == 0:
-            try:
-                data = _fetch_point(f["lat"], f["lon"])
-                summary = _summarize(data.get("hourly") or {})
-                summaries[f["id"]] = summary
-                sampled_points.append({
-                    "lat": f["lat"], "lon": f["lon"], "summary": summary,
-                })
+    to_sample = [(i, f) for i, f in enumerate(facilities) if i % sample_stride == 0]
+    total = len(to_sample)
+    print(f"  [air] sampling {total} points (stride {sample_stride})", flush=True)
+
+    hits = net = skips = rate_limited = 0
+    rl_cooldown_s = 120
+    t0 = time.time()
+    idx = 0
+    queue = list(to_sample)
+    while queue:
+        i, f = queue.pop(0)
+        idx += 1
+        cache_hit = _cache_path(f["lat"], f["lon"]).exists()
+        try:
+            data = _fetch_point(f["lat"], f["lon"])
+            summary = _summarize(data.get("hourly") or {})
+            summaries[f["id"]] = summary
+            sampled_points.append({
+                "lat": f["lat"], "lon": f["lon"], "summary": summary,
+            })
+            if cache_hit:
+                hits += 1
+            else:
+                net += 1
                 time.sleep(0.25)
-            except Exception as e:
-                print(f"  [air] skip {f['id']}: {e}")
+        except RateLimited:
+            rate_limited += 1
+            queue.insert(0, (i, f))
+            idx -= 1
+            print(f"  [air] rate limited after {idx} points — pausing {rl_cooldown_s}s, {len(queue)} remaining", flush=True)
+            time.sleep(rl_cooldown_s)
+            rl_cooldown_s = min(rl_cooldown_s * 2, 600)
+        except Exception as e:
+            skips += 1
+            print(f"  [air] skip {f['id']}: {e}", flush=True)
+
+        if idx % 50 == 0 or idx == total or not queue:
+            elapsed = time.time() - t0
+            pct = 100 * idx / total
+            print(f"  [air] {idx}/{total} ({pct:.0f}%) — cache hits {hits}, network {net}, skips {skips}, rate-limit pauses {rate_limited}, elapsed {elapsed:.0f}s", flush=True)
 
     if not sampled_points:
         return summaries
