@@ -24,6 +24,23 @@ const COUNTRY_NAMES = {
   GTM: "Guatemala",
 };
 
+// Country aura tint — a soft, wide, blurred glow drawn under the dots on
+// the globe, colored by the country's dominant climate hazard so the user
+// can FEEL the difference between countries before reading a single number.
+// Picked to harmonize with the design tokens (--ember, --mod) rather than
+// invent new hues:
+//   Nigeria (NGA)    — heat + dust + drought          → warm ember
+//   Bangladesh (BGD) — flood + monsoon humidity       → cool desaturated cyan
+//   Guatemala (GTM)  — storms + landslides + mixed    → warm amber
+// Subtle by design: opacity tapers to zero as the user zooms in, so the
+// effect lives at globe-view altitudes and never competes with dots at the
+// facility level.
+const COUNTRY_AURA_COLORS = {
+  NGA: "#D87B4F",  // ember — heat-dominant
+  BGD: "#5FA5C7",  // cool cyan — flood-dominant
+  GTM: "#D9A655",  // amber — storm-dominant
+};
+
 // ---- helpers ----
 // Risk-band colours match the CSS design-system tokens exactly:
 //   low #6FA774 · mod #D9B653 · high #D9894F · severe #C35248
@@ -394,6 +411,10 @@ let _prevCountryCenter = null;     // [lng, lat] of the previously-loaded
                              // country, used to draw the great-circle arc
                              // on the next country switch.
 let _countryTrailTimer = null;     // setTimeout handle for clearing the trail.
+let _currentCountryIso = "NGA";    // tracked separately from activeFilters
+                             // since the data load is async; updated at the
+                             // very top of switchCountry so the aura repaint
+                             // can use the new tint immediately.
 
 // ---- Great-circle path helpers (country-trail arc on switchCountry) ----
 //
@@ -432,6 +453,27 @@ function greatCirclePath(start, end, steps = 64) {
     points.push([lambda * 180 / Math.PI, phi * 180 / Math.PI]);
   }
   return points;
+}
+
+// Set (or refresh) the country aura — a single Point feature at the country's
+// center, tinted by the country's dominant climate hazard. The actual circle
+// rendering (radius, blur, opacity-by-zoom) is configured once in updateMap;
+// this helper just feeds the source new coordinates + color whenever the
+// active country changes. 2D and uninitialized states are no-ops.
+function setCountryAura(iso3) {
+  if (!IS_3D) return;
+  const src = map.getSource("country-aura");
+  if (!src) return;
+  const v = VIEWS[iso3] || VIEWS.NGA;
+  const color = COUNTRY_AURA_COLORS[iso3] || COUNTRY_AURA_COLORS.NGA;
+  src.setData({
+    type: "FeatureCollection",
+    features: [{
+      type: "Feature",
+      geometry: { type: "Point", coordinates: v.center },
+      properties: { color },
+    }],
+  });
 }
 
 // Draw the arc as a glowing LineString from `from` to `to` on the globe;
@@ -1279,7 +1321,14 @@ function updateMap() {
   }
 
   const src = map.getSource("facilities");
-  if (src) { src.setData(geojson); return; }
+  if (src) {
+    src.setData(geojson);
+    // Re-tint the aura on country switch even though we early-return before
+    // re-adding any layers — the aura source already exists, only its color
+    // + center need updating.
+    setCountryAura(_currentCountryIso);
+    return;
+  }
 
   // Risk-band colour stops shared by all three layers (glow, dot, selection ring)
   const RISK_STOPS = ["step", ["get", "risk_score"],
@@ -1345,6 +1394,47 @@ function updateMap() {
       "circle-stroke-width": 1.5,
     },
   });
+
+  // Country-aura — a wide blurred glow under the dots, colored by the
+  // country's dominant climate hazard (see COUNTRY_AURA_COLORS). Lives below
+  // facilities-glow so the dots always overlay it. Opacity tapers to zero
+  // as the user zooms in — this is a globe-altitude storytelling cue, not a
+  // facility-level decoration. Source starts empty; populated by
+  // setCountryAura on initial load + each country switch.
+  map.addSource("country-aura", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({
+    id: "country-aura-glow",
+    type: "circle",
+    source: "country-aura",
+    paint: {
+      // Radius grows aggressively with zoom so the aura keeps roughly the
+      // same on-screen footprint over the country regardless of altitude.
+      "circle-radius": [
+        "interpolate", ["linear"], ["zoom"],
+        2, 100,
+        4, 180,
+        5, 260,
+        7, 380,
+        9, 600,
+      ],
+      "circle-color": ["get", "color"],
+      // Visible at globe altitudes, fades out by the time the user zooms
+      // into facility-level detail.
+      "circle-opacity": [
+        "interpolate", ["linear"], ["zoom"],
+        2, 0.20,
+        4, 0.22,
+        5, 0.18,
+        7, 0.10,
+        9, 0.04,
+        11, 0,
+      ],
+      "circle-blur": 1.1,
+    },
+  }, "facilities-glow");
+  // Initial population for the very first load — subsequent country switches
+  // hit the updateMap early-return branch which calls setCountryAura there.
+  setCountryAura(_currentCountryIso);
 
   // Country-trail — a glowing great-circle line on the globe drawn between
   // the previous country's center and the new country's center whenever
@@ -2036,6 +2126,11 @@ function exportGeoJSON() {
 
 // ---- main switch ----
 async function switchCountry(iso3) {
+  // Record the new ISO immediately so the aura repaint (called inside the
+  // updateMap early-return branch a few moments from now) uses the new tint
+  // rather than the previous country's.
+  _currentCountryIso = iso3;
+
   const v = VIEWS[iso3] || VIEWS.NGA;
   const newName = COUNTRY_NAMES[iso3] || iso3;
 
