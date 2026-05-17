@@ -426,7 +426,7 @@ function setTourButtonState() {
   if (icon) icon.textContent = isRunning ? "■" : "▶";
   if (label) {
     label.textContent = isPaused
-      ? "Paused"
+      ? "Resume spotlight"
       : (isRunning ? "Stop spotlight" : "Spotlight critical sites");
   }
 }
