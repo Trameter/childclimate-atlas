@@ -1190,7 +1190,12 @@ body.has-detail #detail.detail {
 #data-overlay {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  /* Must sit above the topbar (z-index 100). When the topbar's z-index
+     was raised to 100 in the OWASP/CSP work, this overlay's z-index 50
+     started getting clipped — the panel rendered beneath the topbar so
+     the title bar of the table modal was hidden. 200 keeps the overlay
+     above any future stacking we add. */
+  z-index: 200;
   display: flex;
   align-items: stretch;
   justify-content: center;
