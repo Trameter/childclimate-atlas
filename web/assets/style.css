@@ -626,40 +626,6 @@ body:not(.has-detail) .side-r { border-left-color: transparent; }
 }
 
 /* =========================================================================
-   3D-only: dark gradient mask at the top of the map area.
-
-   At high camera pitch (the landing-feel dives go to pitch 72), MapLibre's
-   atmospheric halo — a physically-modeled Rayleigh-scattering effect, which
-   is intrinsically bright — fills the top strip of the visible canvas as
-   the camera looks toward the horizon. Even with atmosphere-blend dimmed,
-   the halo's near-white tone reads as a distracting bright bar above the
-   map content.
-
-   Rather than revert the pitch (which kills the landing feel) or kill the
-   atmosphere entirely (which loses the globe ambience), we mask just the
-   problem area: an 80px gradient at the top of the map canvas that fades
-   from solid ink at top to transparent at bottom. Pointer-events: none
-   so it doesn't interfere with map interaction. z-index: 2 sits above the
-   WebGL canvas (which is z-index 0/1 internally) but below MapLibre
-   popups (which sit at z-index 3+) so the spotlight popups still render
-   crisply. 2D mode has no atmosphere so the mask isn't applied. */
-body.is-3d .map-wrap::before {
-  content: "";
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 80px;
-  background: linear-gradient(
-    to bottom,
-    var(--ink) 0%,
-    rgba(16, 21, 32, 0.88) 30%,
-    rgba(16, 21, 32, 0.45) 65%,
-    transparent 100%
-  );
-  pointer-events: none;
-  z-index: 2;
-}
-
-/* =========================================================================
    3D-only floating UI (Spotlight CTA + popup styling)
    Visibility gated on body.is-3d — the 2D ↔ 3D toggle's applyMode() flips
    the class so these appear/disappear in-place without any JS show/hide.

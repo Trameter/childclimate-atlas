@@ -570,14 +570,16 @@ function visitNextSpotlightStop() {
   // arcs don't look identical. We don't bias direction — random across
   // both sides feels more organic than always clockwise.
   const bearingDelta = (Math.random() - 0.5) * SPOTLIGHT_FLY_BEARING_SPREAD;
-  // Higher end-pitch (72) and closer end-zoom (12) make each landing feel
-  // like a drone settling down at the site — the camera tilts forward as it
-  // descends instead of just zooming in flat. Combined with the high arc
-  // curve, this is what reads as a true 3D approach rather than 2D zoom.
+  // Closer end-zoom (12) keeps the “landing”-feel approach without the
+  // higher pitch (72) that was tilting the camera enough to expose
+  // MapLibre's atmospheric halo as a bright strip at the top of the
+  // viewport. Pitch 65 was the original — same 3D arc feel, no white
+  // bar. The high arc curve still gives the camera the climb-and-dive
+  // motion that reads as 3D rather than 2D zoom.
   map.flyTo({
     center: [lng, lat],
     zoom: 12,
-    pitch: 72,
+    pitch: 65,
     bearing: map.getBearing() + bearingDelta,
     duration: flyMs,
     curve: flyCurve,
