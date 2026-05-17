@@ -626,30 +626,6 @@ body:not(.has-detail) .side-r { border-left-color: transparent; }
   color: var(--paper-mute);
 }
 
-/* Cross-mode link inside the detail panel — jumps to the same facility in
-   the other view (3D → 2D dashboard, 2D → 3D globe) in a new tab. */
-.detail-cross-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 10px 0 0;
-  padding: 6px 10px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 10.5px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ember);
-  border: 1px solid rgba(216, 123, 79, 0.5);
-  border-radius: 999px;
-  text-decoration: none;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
-}
-.detail-cross-link:hover {
-  background: rgba(216, 123, 79, 0.12);
-  border-color: var(--ember);
-  color: var(--paper);
-}
-
 /* =========================================================================
    Map loading overlay — shown while the country GeoJSON is being fetched +
    parsed + rendered. Hides on dataReady. Belt to the topbar chip's loading
