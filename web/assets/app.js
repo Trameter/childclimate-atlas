@@ -399,6 +399,27 @@ function hideMapLoading() {
   document.getElementById("map-loading")?.classList.add("hidden");
 }
 
+// Hide the loading overlay only once the map has actually committed the
+// facility source to a render frame — not at the moment dataReady flips.
+// Previously we hid the overlay immediately after applyFilters, but the
+// MapLibre render pipeline has 1–2 async frames between setData() and
+// pixels-on-screen, so the user briefly saw an empty map between the
+// overlay disappearing and the dots painting.
+//
+// 'idle' fires when all loading + rendering is settled. Fallback timeout
+// guards against a stuck overlay if for some reason idle never fires
+// (e.g., an animation is started before the map settles).
+function hideMapLoadingWhenRendered() {
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    hideMapLoading();
+  };
+  map.once("idle", finish);
+  setTimeout(finish, 4000);
+}
+
 function buildSpotlightQueue() {
   // Pull from the CURRENT filtered set so the spotlight always reflects
   // whatever the user is looking at (country switch, state filter, etc.).
@@ -1991,7 +2012,9 @@ async function switchCountry(iso3) {
   // it now (with a brief grace period so the freshly-rendered dots have
   // a beat to appear before the intro spin starts arcing across them).
   dataReady = true;
-  hideMapLoading();
+  // Hide the overlay only once the map has actually painted the dots,
+  // not the moment dataReady flips. Prevents the brief empty-map flash.
+  hideMapLoadingWhenRendered();
 
   // If the landing URL specified a state, apply it now that the state
   // panel has been populated (populateStates above). Programmatic click
