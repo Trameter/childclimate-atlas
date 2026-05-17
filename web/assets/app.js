@@ -1246,21 +1246,18 @@ function updateMap() {
   // 2D ↔ 3D toggle uses setupPulseLayer/teardownPulseLayer below to
   // add or strip the layer on the fly without re-adding the source.
   if (IS_3D) setupPulseLayer();
-  // Selected facility highlight — paper-white ring so the selection is
-  // visible regardless of band color. The previous implementation used
-  // RISK_STOPS for the stroke (band-colored ring) which made the ring
-  // invisible when the selected facility's risk band matched the
-  // surrounding dots (e.g., orange ring around orange dot in a HIGH
-  // cluster). Paper-white contrasts against every band + the dark map.
+  // Selected facility highlight — band-colored ring at a slightly larger
+  // radius than the dot, so the outer edge reads as a halo against the
+  // dark map. The earlier paper-white experiment was too loud against
+  // the design system; the band-color halo is the original, intended look.
   map.addSource("selected", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({
     id: "selected-ring", type: "circle", source: "selected",
     paint: {
-      "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 14, 10, 22, 14, 30],
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 12, 10, 18, 14, 24],
       "circle-color": "rgba(0,0,0,0)",
-      "circle-stroke-color": "#FAF8F4",  // var(--paper) — always contrasts
+      "circle-stroke-color": RISK_STOPS,
       "circle-stroke-width": 3,
-      "circle-stroke-opacity": 0.95,
     },
   });
 
