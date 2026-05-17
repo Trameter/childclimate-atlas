@@ -413,9 +413,6 @@ let _prevCountryCenter = null;     // [lng, lat] of the previously-loaded
                              // country, used to draw the great-circle arc
                              // on the next country switch.
 let _countryTrailTimer = null;     // setTimeout handle for clearing the trail.
-let _countryTrailRaf = null;       // requestAnimationFrame handle for the
-                             // progressive draw — cancelled if a new country
-                             // switch happens mid-draw.
 let _currentCountryIso = "NGA";    // tracked separately from activeFilters
                              // since the data load is async; updated at the
                              // very top of switchCountry so the aura repaint
@@ -481,70 +478,29 @@ function setCountryAura(iso3) {
   });
 }
 
-// Draw the arc as a glowing LineString that GROWS along the great-circle
-// from `from` to `to` in sync with the camera flight, then holds at full
-// length for a beat and clears. The progressive draw means the line traces
-// the camera's journey rather than appearing instantly end-to-end — it
-// sells the "movement across the planet" beat the camera alone can't.
-//
-// drawMs should match the cinematicFlyTo duration for country-level moves
-// (currently 4500ms). holdMs is how long the full line lingers after the
-// camera arrives — enough to register, short enough to fade before stale.
-// Only meaningful in 3D — in 2D the arc would be a flat chord across a
-// flat map, which doesn't read as a journey.
-function showCountryTrail(from, to, drawMs = 4500, holdMs = 2000) {
+// Draw the arc as a glowing LineString from `from` to `to` on the globe;
+// clear it after `holdMs` so it doesn't linger past the user's awareness
+// of the camera arriving. Drawn instantly end-to-end (a progressive draw
+// matched to the camera flyTo was tried and felt slower than the camera
+// itself — see commit aef51c3 reverted). Only meaningful in 3D — in 2D
+// the arc would be a flat chord across a flat map.
+function showCountryTrail(from, to, holdMs = 6500) {
   if (!IS_3D) return;
   const src = map.getSource("country-trail");
   if (!src) return;
-
-  // Cancel any in-progress draw or pending clear from a previous switch —
-  // a new country selection always wins.
-  if (_countryTrailRaf !== null) {
-    cancelAnimationFrame(_countryTrailRaf);
-    _countryTrailRaf = null;
-  }
-  if (_countryTrailTimer !== null) {
-    clearTimeout(_countryTrailTimer);
+  src.setData({
+    type: "FeatureCollection",
+    features: [{
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: greatCirclePath(from, to) },
+      properties: {},
+    }],
+  });
+  if (_countryTrailTimer !== null) clearTimeout(_countryTrailTimer);
+  _countryTrailTimer = setTimeout(() => {
+    map.getSource("country-trail")?.setData({ type: "FeatureCollection", features: [] });
     _countryTrailTimer = null;
-  }
-
-  // Pre-compute the full great-circle once; the animation just advances how
-  // many of those points are visible per frame. 96 steps keeps the curve
-  // smooth at globe zoom without overpaying on every setData().
-  const fullPath = greatCirclePath(from, to, 96);
-  const start = performance.now();
-
-  function frame(now) {
-    const t = Math.min((now - start) / drawMs, 1);
-    // Ease-in-out cubic: matches the camera's natural accelerate-then-
-    // decelerate flyTo curve so the line head stays roughly under the
-    // camera's current great-circle position.
-    const easedT = t < 0.5
-      ? 4 * t * t * t
-      : 1 - Math.pow(-2 * t + 2, 3) / 2;
-    // At least 2 points so MapLibre has a valid LineString from frame 1.
-    const visibleCount = Math.max(2, Math.floor(easedT * fullPath.length));
-    src.setData({
-      type: "FeatureCollection",
-      features: [{
-        type: "Feature",
-        geometry: { type: "LineString", coordinates: fullPath.slice(0, visibleCount) },
-        properties: {},
-      }],
-    });
-    if (t < 1) {
-      _countryTrailRaf = requestAnimationFrame(frame);
-    } else {
-      _countryTrailRaf = null;
-      // Camera has arrived; hold the full line briefly so the user reads it
-      // as "this is the path I just travelled," then clear.
-      _countryTrailTimer = setTimeout(() => {
-        map.getSource("country-trail")?.setData({ type: "FeatureCollection", features: [] });
-        _countryTrailTimer = null;
-      }, holdMs);
-    }
-  }
-  _countryTrailRaf = requestAnimationFrame(frame);
+  }, holdMs);
 }
 
 // ---- Loading overlay (centered "Loading the globe…" badge on the map) ----
