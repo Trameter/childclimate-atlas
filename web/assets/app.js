@@ -335,10 +335,17 @@ function cinematicFlyTo(opts) {
 //                stays propulsive rather than tutorial-paced.
 const SPOTLIGHT_TOP_N = 5;
 const SPOTLIGHT_CONTRAST_LOW_N = 1;
-const SPOTLIGHT_INTRO_MS = 3000;     // opening globe spin
-const SPOTLIGHT_INTRO_BEARING = 70;  // degrees swept during the intro
-const SPOTLIGHT_FLY_MS = 3200;       // travel time per arc
-const SPOTLIGHT_FLY_CURVE = 2.2;     // higher = more pronounced pull-out-then-dive
+const SPOTLIGHT_INTRO_MS = 5000;     // opening globe spin — “scanning” beat
+const SPOTLIGHT_INTRO_BEARING = 70;  // degree magnitude (subtracted at use
+                                     // site = clockwise = right-spinning)
+const SPOTLIGHT_FLY_MS = 3200;       // travel time per NEAR arc (≤ FAR threshold)
+const SPOTLIGHT_FLY_MS_FAR = 5200;   // travel time per FAR arc, stretched so
+                                     // the camera has time to climb high and
+                                     // come back down instead of snapping
+const SPOTLIGHT_FLY_CURVE = 2.2;     // near-arc curve
+const SPOTLIGHT_FLY_CURVE_FAR = 3.2; // far-arc curve — more pronounced pullback
+const SPOTLIGHT_FAR_THRESHOLD_DEG = 2.0; // squared deg distance above which we
+                                         // treat the next stop as “far”
 const SPOTLIGHT_FLY_BEARING_SPREAD = 60; // bearing jitter per arc, in degrees
 const SPOTLIGHT_DWELL_MS = 3000;     // popup dwell per facility
 let tourActive = false;
@@ -356,10 +363,19 @@ function buildSpotlightQueue() {
     (a, b) => b.properties.risk_score - a.properties.risk_score
   );
   const top = sorted.slice(0, SPOTLIGHT_TOP_N);
-  // Take low-risk from the BOTTOM of the list so a contrast site appears
-  // last in the reel — ends the spotlight on “here's what good looks like.”
-  const low = sorted.slice(-SPOTLIGHT_CONTRAST_LOW_N).reverse();
-  return [...top, ...low];
+  // Contrast site: ONLY include if the filtered set actually contains a
+  // genuinely low-band (green) facility. The narrative “here are the worst
+  // — and here is one that's actually safe” only lands if the contrast is
+  // visibly green. If the lowest-risk facility in view is still a yellow
+  // “moderate”, ending the reel on it muddles the message; better to end
+  // on the last critical site than to misrepresent moderate as safe.
+  //
+  // Current data: NGA's lowest score is ~32.5 (mid band), so the contrast
+  // site is skipped for full-Nigeria filters but kicks in for narrower
+  // states or for BGD/GTM where genuine green facilities exist.
+  const lowBand = sorted.filter(f => band(f.properties.risk_score) === "low");
+  const contrast = lowBand.slice(-SPOTLIGHT_CONTRAST_LOW_N).reverse();
+  return [...top, ...contrast];
 }
 
 function invalidateSpotlightQueue() {
@@ -415,11 +431,14 @@ function playSpotlightIntro() {
   const iso = currentData?.metadata?.iso3 || "NGA";
   const v = VIEWS[iso] || VIEWS.NGA;
   const startBearing = map.getBearing();
+  // SUBTRACT bearing — in MapLibre's compass-based bearing model, decreasing
+  // bearing produces a clockwise rotation from the user's perspective
+  // (“spinning to the right”), which matches the original tour direction.
   map.easeTo({
     center: v.center,
     zoom: Math.max(v.zoom - 1.0, 3.5),
     pitch: 60,
-    bearing: startBearing + SPOTLIGHT_INTRO_BEARING,
+    bearing: startBearing - SPOTLIGHT_INTRO_BEARING,
     duration: SPOTLIGHT_INTRO_MS,
   });
   spotlightTimer = setTimeout(() => {
@@ -437,25 +456,37 @@ function visitNextSpotlightStop() {
   const f = spotlightQueue[spotlightIdx];
   const [lng, lat] = f.geometry.coordinates;
 
-  // Arc fly: SPOTLIGHT_FLY_CURVE = 2.2 makes MapLibre's flyTo pull the
-  // camera UP through low-zoom space then back down to the target — the
-  // “spin out and dive back in” feel between sites. Slow speed + long
-  // duration sustain the arc; without these the flyTo would snap.
+  // Distance-aware pacing. Squared degree distance between current camera
+  // center and the target. Cheap enough to compute per stop, no need for
+  // proper haversine — we just want a near/far decision threshold. When
+  // the next site is in the same neighborhood the existing curve reads
+  // fine; when it's across the country, we need a longer duration + higher
+  // curve so the camera has time to climb and come back down. Without
+  // this, far jumps look exactly like 2D snaps.
+  const cur = map.getCenter();
+  const dSq = (cur.lng - lng) ** 2 + (cur.lat - lat) ** 2;
+  const isFar = dSq > SPOTLIGHT_FAR_THRESHOLD_DEG ** 2;
+  const flyMs = isFar ? SPOTLIGHT_FLY_MS_FAR : SPOTLIGHT_FLY_MS;
+  const flyCurve = isFar ? SPOTLIGHT_FLY_CURVE_FAR : SPOTLIGHT_FLY_CURVE;
+  const flySpeed = isFar ? 0.42 : 0.55;
+
   // Bearing jitter (±SPOTLIGHT_FLY_BEARING_SPREAD/2) ensures consecutive
-  // arcs don't look identical.
+  // arcs don't look identical. We don't bias direction — random across
+  // both sides feels more organic than always clockwise.
   const bearingDelta = (Math.random() - 0.5) * SPOTLIGHT_FLY_BEARING_SPREAD;
   map.flyTo({
     center: [lng, lat],
     zoom: 11,
     pitch: 65,
     bearing: map.getBearing() + bearingDelta,
-    duration: SPOTLIGHT_FLY_MS,
-    curve: SPOTLIGHT_FLY_CURVE,
-    speed: 0.55,
+    duration: flyMs,
+    curve: flyCurve,
+    speed: flySpeed,
     essential: true,
   });
 
   // After the fly completes, show the popup and dwell. Then advance.
+  // Schedule against the actual flight duration (which differs near vs far).
   spotlightTimer = setTimeout(() => {
     if (!tourActive) return;
     showSpotlightPopup(f);
@@ -466,7 +497,7 @@ function visitNextSpotlightStop() {
       // Tiny gap so the popup fade-out reads cleanly before the next arc.
       spotlightTimer = setTimeout(visitNextSpotlightStop, 220);
     }, SPOTLIGHT_DWELL_MS);
-  }, SPOTLIGHT_FLY_MS + 150);
+  }, flyMs + 150);
 }
 
 function showSpotlightPopup(f) {
