@@ -63,22 +63,19 @@ button { font-family: inherit; }
 /* =========================================================================
    TOP BAR
    ========================================================================= */
-/* Topbar is FIXED (not sticky) so it's always pinned to the absolute top
-   of the viewport with no chance of a gap above it. High z-index keeps it
-   above MapLibre's WebGL canvas (which renders the bright atmosphere
-   glow). Solid background — no backdrop-filter — means the atmosphere
-   never bleeds through as a milky-white wash. */
+/* Topbar stays in normal flow (sticky, not fixed) so .shell's height calc
+   stays correct. High z-index + opaque background ensure no atmospheric
+   bleed from the WebGL canvas underneath. */
 .topbar {
-  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  position: sticky; top: 0; left: 0; right: 0; z-index: 100;
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 28px;
   border-bottom: 1px solid var(--rule);
   background: var(--ink-2);
+  /* background-color also as a fallback for any user-agent override */
+  background-color: var(--ink-2);
   height: var(--topbar-h);
 }
-/* Because .topbar is now fixed (out of flow), .shell needs an explicit
-   top offset so content doesn't slide under it. */
-.shell { margin-top: var(--topbar-h); }
 .brand {
   display: flex; align-items: center; gap: 12px;
   color: var(--paper);

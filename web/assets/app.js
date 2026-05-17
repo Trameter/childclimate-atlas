@@ -469,7 +469,11 @@ function pauseSpotlight() {
     clearTimeout(spotlightTimer);
     spotlightTimer = null;
   }
-  hideSpotlightPopup(); // detail panel takes over the role of the popup
+  // Keep the popup visible alongside the detail panel — Pere wants the
+  // user's context-anchor on the map to stay put rather than disappear
+  // the moment the side panel opens. The popup auto-clears on the next
+  // visitNextSpotlightStop (which calls hideSpotlightPopup before
+  // showing the new one), so no manual cleanup needed here.
   map.stop();           // halt any in-flight camera animation
 }
 
