@@ -413,9 +413,6 @@ let _prevCountryCenter = null;     // [lng, lat] of the previously-loaded
                              // country, used to draw the great-circle arc
                              // on the next country switch.
 let _countryTrailTimer = null;     // setTimeout handle for clearing the trail.
-let _countryTrailMoveHandler = null;  // map.on("move") listener for the
-                             // camera-following draw — detached on moveend.
-let _countryTrailEndHandler = null;
 let _currentCountryIso = "NGA";    // tracked separately from activeFilters
                              // since the data load is async; updated at the
                              // very top of switchCountry so the aura repaint
@@ -497,93 +494,34 @@ function sphericalDistance(a, b) {
   );
 }
 
-// Draw the arc as a glowing LineString whose HEAD follows the camera as it
-// flies from `from` to `to`. Implementation: a map.on("move") listener
-// projects the camera's current center onto the great-circle by measuring
-// the angular distance travelled from `from`, normalizes to a fraction of
-// the total arc, and shows that many points. moveend detaches the listener,
-// pins the full line, and schedules the clear after `holdMs`. The result
-// reads as the line literally tracing the camera's journey across the
-// planet rather than racing it or trailing it.
+// Draw the arc as a glowing LineString from `from` to `to` on the globe,
+// drawn INSTANTLY end-to-end and held for `holdMs` before clearing. We
+// tried a camera-following version (commit 262d939) where the line head
+// tracked map.getCenter() via move events — looked great in theory, but
+// in practice the heavy 50K-dot setData when switching FROM Nigeria
+// stalled the main thread and starved the move handler, so the line
+// froze mid-flight and snapped at the end. Instant draw is guaranteed
+// smooth because there's no animation to interrupt.
 //
 // Only meaningful in 3D — in 2D the arc would be a flat chord across a
-// flat map. A new country switch mid-flight cancels the previous trail.
-function showCountryTrail(from, to, holdMs = 2000) {
+// flat map. A new country switch cancels any pending clear timer.
+function showCountryTrail(from, to, holdMs = 6500) {
   if (!IS_3D) return;
   const src = map.getSource("country-trail");
   if (!src) return;
-
-  // Cancel any in-progress trail or pending clear from a previous switch.
-  if (_countryTrailTimer !== null) {
-    clearTimeout(_countryTrailTimer);
-    _countryTrailTimer = null;
-  }
-  if (_countryTrailMoveHandler) {
-    map.off("move", _countryTrailMoveHandler);
-    _countryTrailMoveHandler = null;
-  }
-  if (_countryTrailEndHandler) {
-    map.off("moveend", _countryTrailEndHandler);
-    _countryTrailEndHandler = null;
-  }
-
-  const fullPath = greatCirclePath(from, to, 96);
-  const totalAngular = sphericalDistance(from, to);
-  if (totalAngular < 1e-9) return;  // degenerate — same point
-
-  // Seed with the first segment so MapLibre has a valid LineString from
-  // the first frame; the move handler grows it as the camera advances.
   src.setData({
     type: "FeatureCollection",
     features: [{
       type: "Feature",
-      geometry: { type: "LineString", coordinates: fullPath.slice(0, 2) },
+      geometry: { type: "LineString", coordinates: greatCirclePath(from, to) },
       properties: {},
     }],
   });
-
-  _countryTrailMoveHandler = () => {
-    const c = map.getCenter();
-    const progress = sphericalDistance(from, [c.lng, c.lat]);
-    const fraction = Math.min(progress / totalAngular, 1);
-    const visibleCount = Math.max(2, Math.ceil(fraction * fullPath.length));
-    map.getSource("country-trail")?.setData({
-      type: "FeatureCollection",
-      features: [{
-        type: "Feature",
-        geometry: { type: "LineString", coordinates: fullPath.slice(0, visibleCount) },
-        properties: {},
-      }],
-    });
-  };
-
-  _countryTrailEndHandler = () => {
-    // Camera arrived. Detach listeners, draw the full line, hold briefly
-    // so the user reads it as the path travelled, then clear.
-    if (_countryTrailMoveHandler) {
-      map.off("move", _countryTrailMoveHandler);
-      _countryTrailMoveHandler = null;
-    }
-    if (_countryTrailEndHandler) {
-      map.off("moveend", _countryTrailEndHandler);
-      _countryTrailEndHandler = null;
-    }
-    map.getSource("country-trail")?.setData({
-      type: "FeatureCollection",
-      features: [{
-        type: "Feature",
-        geometry: { type: "LineString", coordinates: fullPath },
-        properties: {},
-      }],
-    });
-    _countryTrailTimer = setTimeout(() => {
-      map.getSource("country-trail")?.setData({ type: "FeatureCollection", features: [] });
-      _countryTrailTimer = null;
-    }, holdMs);
-  };
-
-  map.on("move", _countryTrailMoveHandler);
-  map.on("moveend", _countryTrailEndHandler);
+  if (_countryTrailTimer !== null) clearTimeout(_countryTrailTimer);
+  _countryTrailTimer = setTimeout(() => {
+    map.getSource("country-trail")?.setData({ type: "FeatureCollection", features: [] });
+    _countryTrailTimer = null;
+  }, holdMs);
 }
 
 // ---- Loading overlay (centered "Loading the globe…" badge on the map) ----
