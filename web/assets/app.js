@@ -2431,6 +2431,14 @@ async function switchCountry(iso3) {
   updateSearchPlaceholder();
   applyFilters();
 
+  // Defensive: ensure the facility layers are visible after a country
+  // switch. If the user had heatmap on while on the previous country
+  // (which hides the dot layers), or any other path left layers hidden,
+  // this restores them so the new country actually shows its dots.
+  if (!heatmapVisible) {
+    setFacilityLayersVisible(true);
+  }
+
   // Data + map source are now populated. Flip the ready flag, hide the
   // loading overlay, and if a pre-load Spotlight click is pending, fire
   // it now (with a brief grace period so the freshly-rendered dots have
@@ -2633,8 +2641,8 @@ let heatmapVisible = false;
 const FACILITY_LAYER_IDS = [
   "facilities-glow",
   "facilities",
-  "facilities-selected-ring",
-  "facilities-hovered",
+  "selected-ring",  // actual layer id (not "facilities-selected-ring")
+  "hovered-halo",   // actual layer id (not "facilities-hovered")
 ];
 function setFacilityLayersVisible(visible) {
   const vis = visible ? "visible" : "none";

@@ -58,6 +58,17 @@ _rule(
     "PM2.5 is 5-10x WHO guideline. Basic filtration in enclosed areas plus tree/hedge barriers to reduce roadside pollution.",
     "500–1,500",
 )
+# Lower-tier PM2.5 rec for the 12–25 µg/m³ range (still 2-5x the WHO 2021
+# annual guideline of 5 µg/m³). The previous floor of 25 left a real gap:
+# facilities with PM2.5 around 18 µg/m³ were getting flagged as "PM2.5 is
+# a top driver" in plain English but receiving zero air-quality rec.
+_rule(
+    lambda c, a, f: 12 <= a.get("pm25_avg_ugm3", 0) < 25,
+    3, "Air Quality",
+    "Add HEPA filters in patient/learning areas",
+    "PM2.5 is 2-5x the WHO 2021 annual guideline. Even moderate exposure compounds pediatric respiratory load over years. Affordable HEPA units in the most-occupied rooms is the cheapest intervention with measurable impact.",
+    "300–800",
+)
 _rule(
     lambda c, a, f: a.get("pm25_avg_ugm3", 0) >= 35 and f["type"] == "school",
     1, "Air Quality",
