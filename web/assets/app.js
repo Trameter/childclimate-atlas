@@ -768,52 +768,58 @@ function applyMode(want3D) {
   if (want3D === IS_3D) return;
   IS_3D = want3D;
 
-  // 1. Projection switch — instantaneous, no animation parameter.
-  //    Raster tiles in MapLibre v5 reproject correctly across both modes.
+  // STEP 1 — tear down anything that calls map.stop() FIRST.
+  // stopSpotlight calls map.stop() which would otherwise cancel the easeTo
+  // we issue below. Doing this first means the eventual easeTo runs without
+  // interruption and lands at the canonical natural-state framing for the
+  // new mode. This was the root cause of the 2D-shows-tilted-perspective
+  // bug — the spotlight's map.stop() was killing the reset animation.
+  if (!want3D && tourActive) stopSpotlight();
+  if (want3D) setupPulseLayer();
+  else teardownPulseLayer();
+
+  // STEP 2 — update maxPitch so user-interaction respects the mode.
+  // maxPitch was set at map-init based on the initial IS_3D and never
+  // updated on toggle, so 2D->3D was clamping the camera's pitch at 0
+  // (the 2D mode init value) even when easeTo tried to set 55. This is
+  // the root cause of the 2D->3D-still-feels-flat bug.
+  map.setMaxPitch(want3D ? 75 : 0);
+
+  // STEP 3 — switch projection. Instantaneous; the easeTo below carries
+  // the camera into the natural framing for the new projection.
   map.setProjection({ type: want3D ? "globe" : "mercator" });
 
-  // 2. Camera ease into the new mode — same duration as a flyTo so the
-  //    transition feels intentional rather than abrupt.
+  // STEP 4 — ease to the canonical landing state for the new mode. ALWAYS
+  // resets center + zoom + pitch + bearing so the toggle reliably lands at
+  // the SAME natural framing every time, regardless of where the camera
+  // happened to be (deep dive, mid-rotation, etc.) when the toggle fired.
+  const iso = currentData?.metadata?.iso3 || "NGA";
+  const v = VIEWS[iso] || VIEWS.NGA;
   if (want3D) {
-    // Pull back slightly so the curvature is visible; tilt to pitch 55.
-    const currentZoom = map.getZoom();
     map.easeTo({
+      center: v.center,
+      zoom: Math.max(v.zoom - 1.5, 3.5),
       pitch: 55,
-      zoom: Math.min(currentZoom, 4.2),
       bearing: 0,
-      duration: 1200,
+      duration: 1500,
     });
   } else {
-    // Flatten back. Pull camera to the current country's default framing.
-    const iso = currentData?.metadata?.iso3 || "NGA";
-    const v = VIEWS[iso] || VIEWS.NGA;
     map.easeTo({
+      center: v.center,
+      zoom: v.zoom,
       pitch: 0,
       bearing: 0,
-      zoom: v.zoom,
-      center: v.center,
-      duration: 1200,
+      duration: 1500,
     });
   }
 
-  // 3. Reflect mode in the DOM (body class for any CSS that depends on it,
-  //    .vt-btn.active flip on the toggle).
+  // STEP 5 — reflect mode in the DOM (body class for CSS gating, .vt-btn
+  //          active class for the toggle).
   document.body.classList.toggle("is-3d", want3D);
   document.querySelectorAll(".view-toggle .vt-btn").forEach(btn => {
     const href = btn.getAttribute("href");
     btn.classList.toggle("active", href === (want3D ? "/3d" : "/"));
   });
-
-  // 4. Pulse layer is only meaningful in 3D — add it on entry, strip it on
-  //    exit. The setupPulseLayer call is a no-op until the data source
-  //    is ready, so on early toggles it does nothing.
-  if (want3D) setupPulseLayer();
-  else teardownPulseLayer();
-
-  // 5. 3D-only floating UI: stop any active spotlight on exit. The button
-  //    visibility is pure CSS (body.is-3d gate) so it appears/disappears
-  //    automatically with the mode.
-  if (!want3D && tourActive) stopSpotlight();
 }
 
 // ---- 3D pulse animation on the most-critical facilities ----
@@ -1228,6 +1234,25 @@ function updateMap() {
     },
   });
 
+  // Hover halo — a separate source + layer that holds AT MOST one feature
+  // (the one currently under the cursor). Decoupled from the main facility
+  // layer so any future paint changes can't affect base rendering. This is
+  // the safer pattern after the feature-state approach silently broke the
+  // dot render in commit 8eec11e.
+  map.addSource("hovered", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({
+    id: "hovered-halo",
+    type: "circle",
+    source: "hovered",
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 9, 10, 16, 14, 22],
+      "circle-color": RISK_STOPS,
+      "circle-opacity": 0.4,
+      "circle-stroke-color": "rgba(250, 248, 244, 0.7)",  // paper at 70%
+      "circle-stroke-width": 1.5,
+    },
+  });
+
   map.on("click", "facilities", e => {
     if (!e.features.length) return;
     const f = e.features[0];
@@ -1239,12 +1264,28 @@ function updateMap() {
   map.on("mouseenter", "facilities", e => {
     map.getCanvas().style.cursor = "pointer";
     if (!e.features.length) return;
-    const p = e.features[0].properties;
+    const f = e.features[0];
+    const p = f.properties;
+    // Populate the hover-halo source with this single feature — the
+    // hovered-halo layer renders it as a larger glowing ring around the dot.
+    map.getSource("hovered")?.setData({
+      type: "FeatureCollection",
+      features: [{
+        type: "Feature",
+        geometry: f.geometry,
+        properties: { risk_score: p.risk_score },
+      }],
+    });
     popup.setLngLat(e.lngLat)
-      .setHTML(`<b>${escapeHtml(displayName(e.features[0]))}</b><br/>${typeIcon(p.facility_type)} ${escapeHtml(p.facility_type)} &middot; <span style="color:${bandColor(p.risk_score)};font-weight:700">${p.risk_score}</span>`)
+      .setHTML(`<b>${escapeHtml(displayName(f))}</b><br/>${typeIcon(p.facility_type)} ${escapeHtml(p.facility_type)} &middot; <span style="color:${bandColor(p.risk_score)};font-weight:700">${p.risk_score}</span>`)
       .addTo(map);
   });
-  map.on("mouseleave", "facilities", () => { map.getCanvas().style.cursor = ""; popup.remove(); });
+  map.on("mouseleave", "facilities", () => {
+    map.getCanvas().style.cursor = "";
+    // Clear the hover halo by emptying the source's feature list.
+    map.getSource("hovered")?.setData({ type: "FeatureCollection", features: [] });
+    popup.remove();
+  });
 }
 
 // ---- sidebar: stats ----
