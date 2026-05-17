@@ -360,6 +360,75 @@ function applyMode(want3D) {
     const href = btn.getAttribute("href");
     btn.classList.toggle("active", href === (want3D ? "/3d" : "/"));
   });
+
+  // 4. Pulse layer is only meaningful in 3D — add it on entry, strip it on
+  //    exit. The setupPulseLayer call is a no-op until the data source
+  //    is ready, so on early toggles it does nothing.
+  if (want3D) setupPulseLayer();
+  else teardownPulseLayer();
+}
+
+// ---- 3D pulse animation on the most-critical facilities ----
+//
+// Renders a second, separately-styled circle layer that only matches
+// facilities scoring >= 73 (current top-of-distribution; will tighten to
+// 75 SEVERE band once the pipeline re-runs with finer climate stride).
+// circle-stroke-width and circle-stroke-opacity are tweened on every
+// requestAnimationFrame frame, producing a soft expanding ring — the
+// kind of visual cue you can read from globe zoom-out.
+//
+// Performance: filter expression is evaluated GPU-side per dot. At the
+// current top-of-distribution threshold ~few hundred dots qualify, so
+// the pulse layer renders cheaply even on the full 50k-facility country.
+const PULSE_LAYER_ID = "facilities-pulse";
+const PULSE_THRESHOLD = 73;       // risk_score threshold; raise to 75 post-rerun
+const PULSE_PERIOD_SEC = 2.4;     // one full breath in/out
+let pulseRafId = null;
+
+function setupPulseLayer() {
+  if (!map.getSource("facilities")) return;        // data hasn't loaded yet
+  if (map.getLayer(PULSE_LAYER_ID)) return;        // already added
+  map.addLayer({
+    id: PULSE_LAYER_ID,
+    type: "circle",
+    source: "facilities",
+    filter: [">=", ["get", "risk_score"], PULSE_THRESHOLD],
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 10, 10, 18, 14, 28],
+      "circle-color": "rgba(0,0,0,0)",            // ring only, no fill
+      "circle-stroke-color": "#C35248",           // severe red, brand var(--sev)
+      "circle-stroke-width": 1.5,
+      "circle-stroke-opacity": 0.8,
+    },
+  });
+  startPulseAnimation();
+}
+
+function teardownPulseLayer() {
+  stopPulseAnimation();
+  if (map.getLayer(PULSE_LAYER_ID)) map.removeLayer(PULSE_LAYER_ID);
+}
+
+function startPulseAnimation() {
+  if (pulseRafId !== null) return;
+  const t0 = performance.now();
+  function frame() {
+    if (!map.getLayer(PULSE_LAYER_ID)) { pulseRafId = null; return; }
+    const t = (performance.now() - t0) / 1000;
+    const phase = (Math.sin((t / PULSE_PERIOD_SEC) * Math.PI * 2) + 1) / 2; // 0..1
+    // Opacity fades out as the ring expands — the classic “radar ping” feel.
+    map.setPaintProperty(PULSE_LAYER_ID, "circle-stroke-opacity", 0.85 * (1 - phase * 0.9));
+    map.setPaintProperty(PULSE_LAYER_ID, "circle-stroke-width", 1.2 + phase * 5.5);
+    pulseRafId = requestAnimationFrame(frame);
+  }
+  pulseRafId = requestAnimationFrame(frame);
+}
+
+function stopPulseAnimation() {
+  if (pulseRafId !== null) {
+    cancelAnimationFrame(pulseRafId);
+    pulseRafId = null;
+  }
 }
 
 // Intercept toggle clicks: prevent the native navigation, swap in place,
@@ -683,6 +752,12 @@ function updateMap() {
       "circle-stroke-width": 1.2,
     },
   });
+
+  // 3D-only: pulse ring around the top-critical facilities so the eye is
+  // drawn to the worst from anywhere on the globe. Setup-once here; the
+  // 2D ↔ 3D toggle uses setupPulseLayer/teardownPulseLayer below to
+  // add or strip the layer on the fly without re-adding the source.
+  if (IS_3D) setupPulseLayer();
   // Selected facility highlight — single ring, same palette as the dots
   map.addSource("selected", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({
