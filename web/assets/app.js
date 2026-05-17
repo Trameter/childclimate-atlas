@@ -413,6 +413,9 @@ let _prevCountryCenter = null;     // [lng, lat] of the previously-loaded
                              // country, used to draw the great-circle arc
                              // on the next country switch.
 let _countryTrailTimer = null;     // setTimeout handle for clearing the trail.
+let _countryTrailMoveHandler = null;  // map.on("move") listener for the
+                             // camera-following draw — detached on moveend.
+let _countryTrailEndHandler = null;
 let _currentCountryIso = "NGA";    // tracked separately from activeFilters
                              // since the data load is async; updated at the
                              // very top of switchCountry so the aura repaint
@@ -478,29 +481,109 @@ function setCountryAura(iso3) {
   });
 }
 
-// Draw the arc as a glowing LineString from `from` to `to` on the globe;
-// clear it after `holdMs` so it doesn't linger past the user's awareness
-// of the camera arriving. Drawn instantly end-to-end (a progressive draw
-// matched to the camera flyTo was tried and felt slower than the camera
-// itself — see commit aef51c3 reverted). Only meaningful in 3D — in 2D
-// the arc would be a flat chord across a flat map.
-function showCountryTrail(from, to, holdMs = 6500) {
+// Spherical (great-circle) angular distance between two [lng, lat] points
+// in radians. Used to measure how far the camera has travelled along the
+// from→to arc so the line's head can be planted under it each frame.
+function sphericalDistance(a, b) {
+  const phi1 = a[1] * Math.PI / 180;
+  const phi2 = b[1] * Math.PI / 180;
+  const lambda1 = a[0] * Math.PI / 180;
+  const lambda2 = b[0] * Math.PI / 180;
+  return Math.acos(
+    Math.max(-1, Math.min(1,
+      Math.sin(phi1) * Math.sin(phi2) +
+      Math.cos(phi1) * Math.cos(phi2) * Math.cos(lambda2 - lambda1)
+    ))
+  );
+}
+
+// Draw the arc as a glowing LineString whose HEAD follows the camera as it
+// flies from `from` to `to`. Implementation: a map.on("move") listener
+// projects the camera's current center onto the great-circle by measuring
+// the angular distance travelled from `from`, normalizes to a fraction of
+// the total arc, and shows that many points. moveend detaches the listener,
+// pins the full line, and schedules the clear after `holdMs`. The result
+// reads as the line literally tracing the camera's journey across the
+// planet rather than racing it or trailing it.
+//
+// Only meaningful in 3D — in 2D the arc would be a flat chord across a
+// flat map. A new country switch mid-flight cancels the previous trail.
+function showCountryTrail(from, to, holdMs = 2000) {
   if (!IS_3D) return;
   const src = map.getSource("country-trail");
   if (!src) return;
+
+  // Cancel any in-progress trail or pending clear from a previous switch.
+  if (_countryTrailTimer !== null) {
+    clearTimeout(_countryTrailTimer);
+    _countryTrailTimer = null;
+  }
+  if (_countryTrailMoveHandler) {
+    map.off("move", _countryTrailMoveHandler);
+    _countryTrailMoveHandler = null;
+  }
+  if (_countryTrailEndHandler) {
+    map.off("moveend", _countryTrailEndHandler);
+    _countryTrailEndHandler = null;
+  }
+
+  const fullPath = greatCirclePath(from, to, 96);
+  const totalAngular = sphericalDistance(from, to);
+  if (totalAngular < 1e-9) return;  // degenerate — same point
+
+  // Seed with the first segment so MapLibre has a valid LineString from
+  // the first frame; the move handler grows it as the camera advances.
   src.setData({
     type: "FeatureCollection",
     features: [{
       type: "Feature",
-      geometry: { type: "LineString", coordinates: greatCirclePath(from, to) },
+      geometry: { type: "LineString", coordinates: fullPath.slice(0, 2) },
       properties: {},
     }],
   });
-  if (_countryTrailTimer !== null) clearTimeout(_countryTrailTimer);
-  _countryTrailTimer = setTimeout(() => {
-    map.getSource("country-trail")?.setData({ type: "FeatureCollection", features: [] });
-    _countryTrailTimer = null;
-  }, holdMs);
+
+  _countryTrailMoveHandler = () => {
+    const c = map.getCenter();
+    const progress = sphericalDistance(from, [c.lng, c.lat]);
+    const fraction = Math.min(progress / totalAngular, 1);
+    const visibleCount = Math.max(2, Math.ceil(fraction * fullPath.length));
+    map.getSource("country-trail")?.setData({
+      type: "FeatureCollection",
+      features: [{
+        type: "Feature",
+        geometry: { type: "LineString", coordinates: fullPath.slice(0, visibleCount) },
+        properties: {},
+      }],
+    });
+  };
+
+  _countryTrailEndHandler = () => {
+    // Camera arrived. Detach listeners, draw the full line, hold briefly
+    // so the user reads it as the path travelled, then clear.
+    if (_countryTrailMoveHandler) {
+      map.off("move", _countryTrailMoveHandler);
+      _countryTrailMoveHandler = null;
+    }
+    if (_countryTrailEndHandler) {
+      map.off("moveend", _countryTrailEndHandler);
+      _countryTrailEndHandler = null;
+    }
+    map.getSource("country-trail")?.setData({
+      type: "FeatureCollection",
+      features: [{
+        type: "Feature",
+        geometry: { type: "LineString", coordinates: fullPath },
+        properties: {},
+      }],
+    });
+    _countryTrailTimer = setTimeout(() => {
+      map.getSource("country-trail")?.setData({ type: "FeatureCollection", features: [] });
+      _countryTrailTimer = null;
+    }, holdMs);
+  };
+
+  map.on("move", _countryTrailMoveHandler);
+  map.on("moveend", _countryTrailEndHandler);
 }
 
 // ---- Loading overlay (centered "Loading the globe…" badge on the map) ----
@@ -2205,7 +2288,11 @@ async function switchCountry(iso3) {
   // (initial load) or if previous == current (same country reselect).
   if (IS_3D && _prevCountryCenter
       && (_prevCountryCenter[0] !== v.center[0] || _prevCountryCenter[1] !== v.center[1])) {
-    showCountryTrail(_prevCountryCenter, v.center);
+    // Use the actual current camera position as the trail's start — if the
+    // user panned away from the previous country's nominal center, the line
+    // should start where the camera ACTUALLY is so it tracks the flight.
+    const c = map.getCenter();
+    showCountryTrail([c.lng, c.lat], v.center);
   }
   _prevCountryCenter = v.center;
 
