@@ -1053,15 +1053,19 @@ body.has-detail #detail.detail {
    ("HEAT SHIMMER", "FLOOD PULSE") rather than a heading. */
 .microscene {
   position: relative;
-  margin: 0 22px;
+  margin: 18px 22px 4px;
   height: 160px;
   border: 1px solid var(--rule);
   border-radius: 4px;
   overflow: hidden;
   background: var(--ink-2);
-  margin-top: 18px;
-  margin-bottom: 4px;
+  /* Fade-in on first paint so the dispose-then-recreate transition between
+     facility clicks doesn't read as a flicker. .ready is added by app.js
+     once the first synchronous frame has rendered. */
+  opacity: 0;
+  transition: opacity 240ms ease-out;
 }
+.microscene.ready { opacity: 1; }
 .microscene-canvas {
   display: block;
   width: 100%;

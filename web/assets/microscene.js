@@ -63,10 +63,17 @@
       }
     }
     if (!bestKey) return null;
+    // Points + max so the caption can show "25 / 25" the same way the
+    // Score breakdown rows do — makes the vignette legibly tied to the
+    // exact row that drove it.
+    const w = Number(weights?.[bestKey]) || 0;
+    const raw = Number(comps[bestKey]) || 0;
     return {
       scene: COMPONENT_TO_SCENE[bestKey],
-      intensity: Math.max(0, Math.min(1, Number(comps[bestKey]) || 0)),
+      intensity: Math.max(0, Math.min(1, raw)),
       component: bestKey,
+      points: raw * w * 100,
+      maxPoints: w * 100,
     };
   }
 
@@ -404,13 +411,23 @@
     pm25:    makePm25Scene,
   };
 
-  // Display name for the picked stress, shown as the scene's caption.
-  const STRESS_LABEL = {
-    heat:    "Heat shimmer",
-    drought: "Drought drift",
-    flood:   "Flood pulse",
-    pm25:    "PM2.5 haze",
+  // Caption built from the SAME breakdown row the scene is visualising, so
+  // the viewer can tie the vignette back to a specific number in the panel.
+  // Format: "HEAT EXPOSURE · 25 / 25" — driver name + points / max (matches
+  // the Score breakdown rows). Uppercase happens via CSS.
+  const COMPONENT_LABEL = {
+    heat_exposure: "Heat exposure",
+    air_pollution: "Air pollution",
+    flood_risk:    "Flood risk",
+    drought_risk:  "Drought risk",
   };
+  function formatLabel(pick) {
+    const name = COMPONENT_LABEL[pick.component] || pick.component;
+    if (pick.maxPoints > 0) {
+      return `${name} · ${pick.points.toFixed(0)} / ${pick.maxPoints.toFixed(0)}`;
+    }
+    return name;
+  }
 
   function create(canvas, properties, weights) {
     if (typeof THREE === "undefined") {
@@ -425,6 +442,13 @@
 
     const built = builder(canvas, pick.intensity);
     const { renderer, scene, camera } = built.ctx;
+
+    // Paint the first frame SYNCHRONOUSLY before returning so the canvas
+    // never shows as a blank rectangle between dot clicks. Without this,
+    // the dispose-then-recreate flow leaves ~16ms of empty background
+    // colour where the old scene was — reads as a flicker.
+    built.tick(performance.now());
+    renderer.render(scene, camera);
 
     let rafId = null;
     let last = 0;
@@ -460,7 +484,9 @@
       scene: pick.scene,
       component: pick.component,
       intensity: pick.intensity,
-      label: STRESS_LABEL[pick.scene],
+      points: pick.points,
+      maxPoints: pick.maxPoints,
+      label: formatLabel(pick),
     };
   }
 

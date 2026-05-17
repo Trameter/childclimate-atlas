@@ -1891,15 +1891,18 @@ function renderDetail(feature) {
   if (typeof MicroScene !== "undefined" && MicroScene.create) {
     const canvas = document.getElementById("microscene-canvas");
     const label  = document.getElementById("microscene-label");
+    const wrap   = canvas?.closest(".microscene");
     if (canvas) {
       _activeMicroScene = MicroScene.create(canvas, p, weights);
       if (_activeMicroScene && label) {
         label.textContent = _activeMicroScene.label;
-      } else if (label) {
+        // .ready triggers the CSS opacity fade-in. rAF defer so the class
+        // change is on a fresh frame, not batched with the initial style.
+        if (wrap) requestAnimationFrame(() => wrap.classList.add("ready"));
+      } else if (wrap) {
         // No dominant stress (all components zero / missing). Hide the
         // whole microscene block so it doesn't sit there empty.
-        const wrap = canvas.closest(".microscene");
-        if (wrap) wrap.style.display = "none";
+        wrap.style.display = "none";
       }
     }
   }
