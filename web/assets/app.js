@@ -288,10 +288,11 @@ const _baseStyle = {
 _baseStyle.sky = {
   "atmosphere-blend": [
     "interpolate", ["linear"], ["zoom"],
-    0,  0.45,  // bright space-edge halo — the signature "globe rim"
-    4,  0.30,  // still clearly visible at globe-survey altitudes
-    7,  0.10,  // gentle rim still present at working country zoom
-    10, 0,     // fade only once user dives into street-level detail
+    0,  0.70,  // signature bright halo at space zoom — the "wow" framing
+    4,  0.60,  // still strong at globe-survey altitudes
+    7,  0.45,  // halo STAYS visible at working country zoom (was the bug)
+    10, 0.20,  // gentle rim at sub-country zoom
+    14, 0,     // fade only once user is at street-level detail
   ],
 };
 _baseStyle.projection = { type: IS_3D ? "globe" : "mercator" };
