@@ -2186,6 +2186,9 @@ document.addEventListener("DOMContentLoaded", () => {
   map.on("touchstart", cancelOnUser);
 
   document.getElementById("country").addEventListener("change", e => {
+    // Mobile: close the drawer so the camera-flight to the new country is
+    // immediately visible. No-op on desktop (class is never set).
+    document.body.classList.remove("mobile-menu-open");
     switchCountry(e.target.value);
     // Also blur on change so the browser focus ring drops immediately,
     // before the async switchCountry's animation kicks in.
@@ -2259,6 +2262,24 @@ document.addEventListener("DOMContentLoaded", () => {
     if (tourActive && spotlightPaused) resumeSpotlight();
   });
 
+  // ---- Mobile drawer (hamburger) wiring ----
+  // The hamburger button and backdrop live in the HTML on both pages but are
+  // only visible at the mobile breakpoint via CSS. Toggle body.mobile-menu-open
+  // to slide the left sidebar in as a drawer; clicking the backdrop or
+  // pressing Escape closes it. Picking a country also closes the drawer so
+  // the user immediately sees the map fly to the new region.
+  const mobileMenuBtn = document.getElementById("btn-mobile-menu");
+  const mobileBackdrop = document.getElementById("mobile-backdrop");
+  function setMobileMenuOpen(open) {
+    document.body.classList.toggle("mobile-menu-open", open);
+    mobileMenuBtn?.setAttribute("aria-expanded", open ? "true" : "false");
+    mobileBackdrop?.setAttribute("aria-hidden", open ? "false" : "true");
+  }
+  mobileMenuBtn?.addEventListener("click", () => {
+    setMobileMenuOpen(!document.body.classList.contains("mobile-menu-open"));
+  });
+  mobileBackdrop?.addEventListener("click", () => setMobileMenuOpen(false));
+
   // "/" keyboard shortcut → focus search input
   document.addEventListener("keydown", (e) => {
     // Don't hijack when user is already typing in a field
@@ -2269,6 +2290,12 @@ document.addEventListener("DOMContentLoaded", () => {
       document.getElementById("search")?.focus();
     }
     if (e.key === "Escape") {
+      // Mobile drawer takes priority over detail panel — if both are open,
+      // a single Escape closes the most recently opened (the drawer).
+      if (document.body.classList.contains("mobile-menu-open")) {
+        setMobileMenuOpen(false);
+        return;
+      }
       // Close detail panel on Escape — also resume spotlight if paused.
       if (document.body.classList.contains("has-detail")) {
         closeDetail();

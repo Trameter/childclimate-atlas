@@ -1433,6 +1433,63 @@ footer a:hover { color: var(--paper); }
 footer .mono { font-size: 10px; }
 
 /* =========================================================================
+   MOBILE MENU (hamburger + backdrop)
+   Hidden on desktop via display:none; the 820px media query below turns
+   the hamburger on, slides the left sidebar in as a drawer, and shows the
+   facility-detail panel as a full-screen overlay.
+   ========================================================================= */
+.mobile-menu-btn {
+  display: none;
+  align-items: center; justify-content: center;
+  width: 36px; height: 36px;
+  margin-right: 6px;
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  color: var(--paper-mute);
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.mobile-menu-btn:hover { color: var(--paper); border-color: var(--paper-soft); }
+.mobile-menu-btn .mm-bars {
+  position: relative;
+  display: block;
+  width: 16px; height: 2px;
+  background: currentColor;
+  border-radius: 1px;
+  transition: background 0.18s;
+}
+.mobile-menu-btn .mm-bars::before,
+.mobile-menu-btn .mm-bars::after {
+  content: "";
+  position: absolute; left: 0;
+  width: 16px; height: 2px;
+  background: currentColor;
+  border-radius: 1px;
+  transition: top 0.18s, transform 0.18s;
+}
+.mobile-menu-btn .mm-bars::before { top: -5px; }
+.mobile-menu-btn .mm-bars::after  { top: 5px; }
+body.mobile-menu-open .mobile-menu-btn {
+  color: var(--ember);
+  border-color: var(--ember);
+}
+body.mobile-menu-open .mobile-menu-btn .mm-bars { background: transparent; }
+body.mobile-menu-open .mobile-menu-btn .mm-bars::before { top: 0; transform: rotate(45deg); }
+body.mobile-menu-open .mobile-menu-btn .mm-bars::after  { top: 0; transform: rotate(-45deg); }
+
+.mobile-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(8, 10, 18, 0.62);
+  z-index: 85;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease-out;
+}
+
+/* =========================================================================
    RESPONSIVE
    ========================================================================= */
 @media (max-width: 1100px) {
@@ -1449,6 +1506,71 @@ footer .mono { font-size: 10px; }
   :root { --left-w: 0; --right-w: 0; }
   .shell { grid-template-columns: 1fr; }
   body.has-detail .shell { grid-template-columns: 1fr; }
-  .side { display: none; }
+  .topbar { padding: 10px 14px; gap: 8px; }
   .topbar .nav { display: none; }
+
+  /* Hamburger button visible — toggles the left drawer. */
+  .mobile-menu-btn { display: inline-flex; }
+
+  /* Topbar right: keep view toggle + github, drop the wide chip (already
+     hidden at 1100px). Compact spacing so all elements fit on a 320-360px row. */
+  .topbar .right { gap: 8px; }
+  .topbar .brand .wm span { display: none; }   /* show only bold "ChildClimate" */
+
+  /* LEFT sidebar becomes a slide-in drawer.
+     :not(.side-r) so this rule doesn't apply to the right detail panel. */
+  .side:not(.side-r) {
+    display: flex;
+    position: fixed;
+    top: var(--topbar-h);
+    left: 0;
+    width: 88vw;
+    max-width: 360px;
+    height: calc(100vh - var(--topbar-h));
+    z-index: 90;
+    transform: translateX(-100%);
+    transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+    box-shadow: 6px 0 24px rgba(0, 0, 0, 0.45);
+    border-right: 1px solid var(--rule);
+    visibility: hidden;
+  }
+  body.mobile-menu-open .side:not(.side-r) {
+    transform: translateX(0);
+    visibility: visible;
+  }
+  body.mobile-menu-open .mobile-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* RIGHT facility detail becomes a full-screen overlay. Must override the
+     desktop "display: flex" inheritance from .side, and the desktop
+     transition logic. Borderless; lives above the drawer so a dot click
+     while the drawer is open still surfaces detail cleanly. */
+  .side-r {
+    display: block;
+    position: fixed;
+    inset: var(--topbar-h) 0 0 0;
+    width: 100vw;
+    z-index: 95;
+    background: var(--ink);
+    transform: translateX(100%);
+    transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+    border-left: 0;
+    visibility: hidden;
+  }
+  body.has-detail .side-r {
+    transform: translateX(0);
+    visibility: visible;
+  }
+  body:not(.has-detail) .side-r { border-left-color: transparent; }
+
+  /* HUD chips — slim down so the map breathes on small screens. */
+  .map-hud-tl, .map-hud-bl { gap: 6px; }
+  .map-hud-tl { top: 12px; left: 12px; }
+  .map-hud-bl { bottom: 12px; left: 12px; }
+  .hud { padding: 5px 9px; font-size: 11px; }
+
+  /* Footer: tighter, smaller type — already wraps at 1100px. */
+  footer { gap: 8px; padding: 8px 14px; font-size: 11px; }
 }

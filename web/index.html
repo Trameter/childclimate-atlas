@@ -24,6 +24,9 @@
 
   <!-- ============ TOP BAR ============ -->
   <header class="topbar">
+    <button type="button" class="mobile-menu-btn" id="btn-mobile-menu" aria-label="Open filters menu" aria-expanded="false">
+      <span class="mm-bars" aria-hidden="true"></span>
+    </button>
     <a class="brand" href="/" aria-label="ChildClimate Atlas home">
       <svg class="logo-mark" width="28" height="28" viewBox="0 0 76 76" aria-hidden="true">
         <circle cx="38" cy="38" r="34" fill="none" stroke="currentColor" stroke-width="2.5"/>
@@ -212,6 +215,9 @@
     <span><a href="https://tally.so/r/gDNl6l" target="_blank" rel="noopener">Flag a missing facility</a></span>
     <span><a href="https://github.com/Trameter/childclimate-atlas" target="_blank" rel="noopener">MIT · open source</a></span>
   </footer>
+
+  <!-- Mobile drawer backdrop: only visible when body.mobile-menu-open. Clicking it closes the drawer. -->
+  <div class="mobile-backdrop" id="mobile-backdrop" aria-hidden="true"></div>
 
   <script src="./assets/vendor/maplibre-gl@5.24.0/maplibre-gl.js"></script>
   <script src="./assets/app.js"></script>
