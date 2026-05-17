@@ -399,6 +399,17 @@ body:not(.has-detail) .side-r { border-left-color: transparent; }
 }
 .select > select:hover,
 .select > .state-btn:hover { border-color: var(--paper-soft); }
+/* Suppress the browser's default focus ring on mouse-click — with the
+   dark design system it reads as a stuck-active state instead of a focus
+   cue. Keep :focus-visible (keyboard-only focus) ember-tinted for a11y. */
+.select > select:focus,
+.select > .state-btn:focus { outline: none; border-color: var(--rule); }
+.select > select:focus-visible,
+.select > .state-btn:focus-visible {
+  outline: 2px solid var(--ember);
+  outline-offset: 1px;
+  border-color: var(--ember);
+}
 .select::after {
   content: "";
   position: absolute;

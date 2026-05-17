@@ -286,13 +286,18 @@ map.addControl(new maplibregl.NavigationControl({ visualizePitch: IS_3D }), "top
 // the working tool stays predictable. 3D path adds pitch + bearing so the
 // camera arcs across the globe + dives into the target facility, which is
 // the whole point of the immersive view.
+//
+// Two pacing profiles in 3D:
+//   * facility dive  (zoom ≥ 11) — quick + sharp, 2.4s, bearing jitter
+//   * country/state move (zoom < 11) — long + intentional, 4.5s with high
+//     curve, so that switching countries reads as a deliberate camera
+//     swing across the globe to the new region. Anything faster makes
+//     cross-continent jumps (Nigeria ↔ Bangladesh) feel rushed.
 function cinematicFlyTo(opts) {
   if (!IS_3D) {
     map.flyTo(opts);
     return;
   }
-  // For deep zoom (facility focus) we want a dramatic dive: high pitch,
-  // slightly randomized bearing so consecutive clicks don't look identical.
   const targetZoom = opts.zoom ?? map.getZoom();
   const isFacilityDive = targetZoom >= 11;
   const bearing = isFacilityDive
@@ -301,11 +306,11 @@ function cinematicFlyTo(opts) {
   map.flyTo({
     center: opts.center,
     zoom: targetZoom,
-    pitch: isFacilityDive ? 65 : 50,
+    pitch: isFacilityDive ? 65 : 55,
     bearing,
-    duration: isFacilityDive ? 2400 : 1800,
-    curve: 1.5,
-    speed: 0.7,
+    duration: isFacilityDive ? 2400 : 4500,
+    curve: isFacilityDive ? 1.5 : 2.5,
+    speed: isFacilityDive ? 0.7 : 0.4,
     essential: true,
   });
 }
@@ -1823,7 +1828,12 @@ document.addEventListener("DOMContentLoaded", () => {
   map.on("wheel", cancelOnUser);
   map.on("touchstart", cancelOnUser);
 
-  document.getElementById("country").addEventListener("change", e => switchCountry(e.target.value));
+  document.getElementById("country").addEventListener("change", e => {
+    switchCountry(e.target.value);
+    // Also blur on change so the browser focus ring drops immediately,
+    // before the async switchCountry's animation kicks in.
+    e.target.blur();
+  });
   // State dropdown toggle
   document.getElementById("state-btn").addEventListener("click", (e) => {
     e.stopPropagation();
