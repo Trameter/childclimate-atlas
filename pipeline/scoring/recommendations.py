@@ -63,10 +63,10 @@ _rule(
 # facilities with PM2.5 around 18 µg/m³ were getting flagged as "PM2.5 is
 # a top driver" in plain English but receiving zero air-quality rec.
 _rule(
-    lambda c, a, f: 12 <= a.get("pm25_avg_ugm3", 0) < 25,
+    lambda c, a, f: 10 <= a.get("pm25_avg_ugm3", 0) < 25,
     3, "Air Quality",
     "Add HEPA filters in patient/learning areas",
-    "PM2.5 is 2-5x the WHO 2021 annual guideline. Even moderate exposure compounds pediatric respiratory load over years. Affordable HEPA units in the most-occupied rooms is the cheapest intervention with measurable impact.",
+    "PM2.5 is 2-5x the WHO 2021 annual guideline (5 µg/m³). Even moderate exposure compounds pediatric respiratory load over years. Affordable HEPA units in the most-occupied rooms is the cheapest intervention with measurable impact.",
     "300–800",
 )
 _rule(
