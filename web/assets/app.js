@@ -288,9 +288,10 @@ const _baseStyle = {
 _baseStyle.sky = {
   "atmosphere-blend": [
     "interpolate", ["linear"], ["zoom"],
-    0, 0.35,  // gentle haze at space zoom (was 1.0 — too bright)
-    4, 0.2,   // dimmer at country zoom
-    7, 0,     // gone by sub-country zoom
+    0,  0.45,  // bright space-edge halo — the signature "globe rim"
+    4,  0.30,  // still clearly visible at globe-survey altitudes
+    7,  0.10,  // gentle rim still present at working country zoom
+    10, 0,     // fade only once user dives into street-level detail
   ],
 };
 _baseStyle.projection = { type: IS_3D ? "globe" : "mercator" };
@@ -2413,6 +2414,25 @@ document.addEventListener("DOMContentLoaded", () => {
 // ---- heatmap layer toggle ----
 let heatmapVisible = false;
 
+// Facility-related layers that get hidden while the heatmap is on, so the
+// heatmap reads as a distinct REGIONAL view (concentration of risk by area)
+// instead of an extra wash painted on top of the per-facility dots. Includes
+// glow, dots, selection ring, and hover ring — everything tied to individual
+// facilities. The aura + country-trail stay (they're globe storytelling, not
+// per-facility decoration).
+const FACILITY_LAYER_IDS = [
+  "facilities-glow",
+  "facilities",
+  "facilities-selected-ring",
+  "facilities-hovered",
+];
+function setFacilityLayersVisible(visible) {
+  const vis = visible ? "visible" : "none";
+  FACILITY_LAYER_IDS.forEach(id => {
+    if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis);
+  });
+}
+
 function toggleHeatmap() {
   heatmapVisible = !heatmapVisible;
   const btn = document.getElementById("btn-heatmap");
@@ -2442,10 +2462,12 @@ function toggleHeatmap() {
       }, "facilities-glow");
     }
     map.setLayoutProperty("heatmap", "visibility", "visible");
+    setFacilityLayersVisible(false);
   } else {
     btn?.classList.remove("active");
     if (hud) hud.textContent = "Heatmap · off";
     if (map.getLayer("heatmap")) map.setLayoutProperty("heatmap", "visibility", "none");
+    setFacilityLayersVisible(true);
   }
 }
 
