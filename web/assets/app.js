@@ -496,6 +496,11 @@ function resumeSpotlight() {
   if (document.body.classList.contains("has-detail")) {
     closeDetail();
   }
+  // Clear the paused-state popup before the next arc fires — otherwise it
+  // hangs around at the previous facility's location for the full 5s of
+  // travel, visually persisting on screen during the cinematic move and
+  // also blocking the next popup from mounting cleanly at its new spot.
+  hideSpotlightPopup();
   // Advance past the stop the user just drilled into — they've already
   // seen that one in full detail, no need to re-visit. The brief setTimeout
   // gives the close-detail animation a beat to start.
@@ -539,6 +544,11 @@ function visitNextSpotlightStop() {
     finishSpotlight();
     return;
   }
+  // Belt-and-braces popup hide before every flight — the dwell-advance
+  // path already hides, and resumeSpotlight hides too, but a hide here
+  // means no path through the state machine can ever leave a stale popup
+  // anchored at the previous facility while the camera arcs to the next.
+  hideSpotlightPopup();
   const f = spotlightQueue[spotlightIdx];
   const [lng, lat] = f.geometry.coordinates;
 
