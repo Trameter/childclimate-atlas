@@ -183,19 +183,14 @@
         <div class="hud mono">© OSM · GRID3 · ERA5 · CAMS</div>
       </div>
 
-      <!-- First-visit interactivity hint (3D only, dismissible, persists
-           dismissal in localStorage so returning users don't see it again) -->
-      <div class="map-hint" id="map-hint" role="status" aria-live="polite">
-        <span class="hint-icon" aria-hidden="true">↻</span>
-        <span class="hint-text">Drag to rotate · scroll to zoom</span>
-        <button type="button" class="hint-close" id="hint-close" aria-label="Dismiss hint">×</button>
-      </div>
-
-      <!-- Take-the-tour CTA (3D only) — auto-rotates the camera around the
-           current country. Cancelled by user interaction or another click. -->
+      <!-- Spotlight (3D only) — cinematic flyover that stops on each of the
+           top-critical facilities in the current view + one contrasting low
+           for context, with a popup at each stop. Cancelled by any user
+           interaction with the map; click again to resume from where you
+           stopped. -->
       <button type="button" class="map-tour-btn" id="btn-tour">
         <span class="tour-icon" aria-hidden="true">▶</span>
-        <span class="tour-label">Take the tour</span>
+        <span class="tour-label">Spotlight critical sites</span>
       </button>
     </main>
 

@@ -310,45 +310,50 @@ function cinematicFlyTo(opts) {
   });
 }
 
-// ---- 3D-only floating UI: first-visit hint + take-the-tour button ----
+// ---- 3D-only floating UI: Spotlight (cinematic flyover of critical sites) ----
 //
-// Both elements live in the HTML of both pages (so the toggle can show
-// them in-place without touching the DOM tree). Visibility for the tour
-// button is pure CSS (body.is-3d .map-tour-btn { display: inline-flex }).
-// The hint additionally needs the .show class — we only add it when
-// IS_3D AND the user hasn't dismissed it before.
+// On click, the camera flies through the top-N most-critical facilities in
+// the current filtered view + one contrasting low-risk site. Each stop
+// shows a custom popup with the facility name, score band, score, top
+// driver, and location. Cancellable mid-flight by ANY user interaction
+// with the map (mousedown/wheel/touchstart); the next click resumes from
+// where the user paused rather than restarting from the top.
 //
-// Tour: a manual requestAnimationFrame bearing sweep, not map.easeTo,
-// because easeTo over 360° of bearing change can flicker through the
-// 0/-360 boundary on some MapLibre versions. The rAF loop is precise
-// and trivially cancellable via the tourActive flag.
-const HINT_DISMISSED_KEY = "atlas-3d-hint-dismissed";
-const HINT_AUTO_DISMISS_MS = 12000;
-const TOUR_INTRO_MS = 1500;       // ease into the wide tilted framing
-const TOUR_ROTATE_MS = 25000;     // one full 360° rotation
+// Why "Spotlight critical sites" instead of "Take the tour": the verb
+// promises something specific (a curated highlight reel) instead of
+// implying the platform needs to be explained. "Stop spotlight" while
+// active.
+const SPOTLIGHT_TOP_N = 5;          // most-critical facilities in the highlight reel
+const SPOTLIGHT_CONTRAST_LOW_N = 1; // bottom-N to fly to last for context
+const SPOTLIGHT_FLY_MS = 2400;      // travel time between stops
+const SPOTLIGHT_DWELL_MS = 5500;    // popup pause at each stop
 let tourActive = false;
-let hintAutoDismissId = null;
+let spotlightQueue = [];     // ordered array of facility features to visit
+let spotlightIdx = 0;        // index of the NEXT stop to visit (resume token)
+let spotlightTimer = null;   // setTimeout handle for the schedule chain
+let spotlightPopup = null;   // active maplibregl.Popup instance
 
-function showHint() {
-  if (!IS_3D) return;
-  if (localStorage.getItem(HINT_DISMISSED_KEY) === "1") return;
-  const hint = document.getElementById("map-hint");
-  if (!hint) return;
-  hint.classList.add("show");
-  if (hintAutoDismissId !== null) clearTimeout(hintAutoDismissId);
-  hintAutoDismissId = setTimeout(() => dismissHint(true), HINT_AUTO_DISMISS_MS);
+function buildSpotlightQueue() {
+  // Pull from the CURRENT filtered set so the spotlight always reflects
+  // whatever the user is looking at (country switch, state filter, etc.).
+  if (!filteredFeatures || filteredFeatures.length === 0) return [];
+  const sorted = [...filteredFeatures].sort(
+    (a, b) => b.properties.risk_score - a.properties.risk_score
+  );
+  const top = sorted.slice(0, SPOTLIGHT_TOP_N);
+  // Take low-risk from the BOTTOM of the list so a contrast site appears
+  // last in the reel — ends the spotlight on “here's what good looks like.”
+  const low = sorted.slice(-SPOTLIGHT_CONTRAST_LOW_N).reverse();
+  return [...top, ...low];
 }
 
-function dismissHint(persist) {
-  const hint = document.getElementById("map-hint");
-  if (hint) hint.classList.remove("show");
-  if (hintAutoDismissId !== null) {
-    clearTimeout(hintAutoDismissId);
-    hintAutoDismissId = null;
-  }
-  if (persist) {
-    try { localStorage.setItem(HINT_DISMISSED_KEY, "1"); } catch {}
-  }
+function invalidateSpotlightQueue() {
+  // Called when filters / country change so a resumed spotlight doesn't
+  // visit stale facilities. Also stops any active run — the user's filter
+  // change is the more recent intent.
+  spotlightQueue = [];
+  spotlightIdx = 0;
+  if (tourActive) stopSpotlight();
 }
 
 function setTourButtonState(active) {
@@ -358,54 +363,139 @@ function setTourButtonState(active) {
   const icon = btn.querySelector(".tour-icon");
   const label = btn.querySelector(".tour-label");
   if (icon) icon.textContent = active ? "■" : "▶";
-  if (label) label.textContent = active ? "Stop tour" : "Take the tour";
+  if (label) label.textContent = active ? "Stop spotlight" : "Spotlight critical sites";
 }
 
-function startTour() {
+function startSpotlight() {
   if (!IS_3D || tourActive) return;
+  // Rebuild the queue if it's empty (first run, or after a country/filter change).
+  // Keep the existing queue if we're resuming — spotlightIdx points at the next
+  // unvisited stop and we want to continue from there.
+  if (spotlightQueue.length === 0 || spotlightIdx >= spotlightQueue.length) {
+    spotlightQueue = buildSpotlightQueue();
+    spotlightIdx = 0;
+  }
+  if (spotlightQueue.length === 0) return;
   tourActive = true;
   setTourButtonState(true);
-
-  const iso = currentData?.metadata?.iso3 || "NGA";
-  const v = VIEWS[iso] || VIEWS.NGA;
-  const startBearing = map.getBearing();
-
-  // Phase 1 — ease into the wide, tilted touring framing.
-  map.easeTo({
-    center: v.center,
-    zoom: Math.max(v.zoom - 1.0, 3.5),
-    pitch: 60,
-    bearing: startBearing,
-    duration: TOUR_INTRO_MS,
-  });
-
-  // Phase 2 — manual bearing rotation via rAF, started after the intro ease.
-  setTimeout(() => {
-    if (!tourActive) return;
-    let t0 = null;
-    function rotate(now) {
-      if (!tourActive) return;
-      if (t0 === null) t0 = now;
-      const elapsed = now - t0;
-      if (elapsed >= TOUR_ROTATE_MS) {
-        stopTour();
-        return;
-      }
-      const sweep = (elapsed / TOUR_ROTATE_MS) * 360;
-      map.setBearing(startBearing - sweep);
-      requestAnimationFrame(rotate);
-    }
-    requestAnimationFrame(rotate);
-  }, TOUR_INTRO_MS);
+  visitNextSpotlightStop();
 }
 
-function stopTour() {
+function visitNextSpotlightStop() {
+  if (!tourActive) return;
+  if (spotlightIdx >= spotlightQueue.length) {
+    finishSpotlight();
+    return;
+  }
+  const f = spotlightQueue[spotlightIdx];
+  const [lng, lat] = f.geometry.coordinates;
+
+  // Phase 1: cinematic fly into the facility. Slight bearing jitter each
+  // stop so consecutive flights don't look identical.
+  map.flyTo({
+    center: [lng, lat],
+    zoom: 11,
+    pitch: 65,
+    bearing: map.getBearing() + (Math.random() * 40 - 20),
+    duration: SPOTLIGHT_FLY_MS,
+    curve: 1.5,
+    speed: 0.7,
+    essential: true,
+  });
+
+  // Phase 2: small buffer after fly completes, then show the popup and
+  // dwell. Phase 3: hide popup and advance.
+  spotlightTimer = setTimeout(() => {
+    if (!tourActive) return;
+    showSpotlightPopup(f);
+    spotlightTimer = setTimeout(() => {
+      if (!tourActive) return;
+      hideSpotlightPopup();
+      spotlightIdx++;
+      // Tiny gap before the next fly so the popup teardown reads clean.
+      spotlightTimer = setTimeout(visitNextSpotlightStop, 250);
+    }, SPOTLIGHT_DWELL_MS);
+  }, SPOTLIGHT_FLY_MS + 200);
+}
+
+function showSpotlightPopup(f) {
+  const p = f.properties;
+  const s = p.risk_score;
+  const tier = bandLabel(s);
+  const tierClass = band(s);
+  const drivers = typeof p.top_drivers === "string" ? JSON.parse(p.top_drivers) : (p.top_drivers || []);
+  const topDriver = drivers[0] ? drivers[0].replace(/_/g, " ") : "";
+  const tags = typeof p.tags === "string" ? JSON.parse(p.tags || "{}") : (p.tags || {});
+  const state = tags["admin1"] || tags["addr:state"] || "";
+  const lga = tags["addr:city"] || "";
+  const loc = [lga, state].filter(Boolean).join(" · ");
+
+  hideSpotlightPopup();
+  spotlightPopup = new maplibregl.Popup({
+    closeButton: false,
+    closeOnClick: false,
+    offset: 22,
+    className: "spotlight-popup",
+  })
+    .setLngLat(f.geometry.coordinates)
+    .setHTML(`
+      <div class="spotlight-pop">
+        <span class="tier ${tierClass}">${escapeHtml(tier)} risk</span>
+        <div class="name">${escapeHtml(displayName(f))}</div>
+        <div class="meta">
+          <span class="score" style="color:${bandColor(s)}">${s.toFixed(0)}</span>
+          ${topDriver ? `<span class="driver">${escapeHtml(topDriver)}</span>` : ""}
+        </div>
+        ${loc ? `<div class="location">${escapeHtml(loc)}</div>` : ""}
+      </div>
+    `)
+    .addTo(map);
+}
+
+function hideSpotlightPopup() {
+  if (spotlightPopup) {
+    spotlightPopup.remove();
+    spotlightPopup = null;
+  }
+}
+
+function finishSpotlight() {
+  // End of the curated reel — ease back to the country overview.
+  const iso = currentData?.metadata?.iso3 || "NGA";
+  const v = VIEWS[iso] || VIEWS.NGA;
+  map.flyTo({
+    center: v.center,
+    zoom: Math.max(v.zoom - 1.0, 3.5),
+    pitch: 55,
+    bearing: 0,
+    duration: 2500,
+  });
+  stopSpotlight();
+  // Reset for next run — next click rebuilds the queue from scratch.
+  spotlightIdx = 0;
+  spotlightQueue = [];
+}
+
+function stopSpotlight() {
   if (!tourActive) return;
   tourActive = false;
   setTourButtonState(false);
-  // Halt any in-flight easeTo so the camera stays where the rotation left it.
+  hideSpotlightPopup();
+  if (spotlightTimer !== null) {
+    clearTimeout(spotlightTimer);
+    spotlightTimer = null;
+  }
+  // Halt any in-flight flyTo so the camera stops where it is.
   map.stop();
+  // INTENTIONALLY don't reset spotlightIdx / spotlightQueue — next click
+  // resumes from where the user paused. invalidateSpotlightQueue() is the
+  // one that wipes them, called on filter/country change.
 }
+
+// Kept as a stable alias so applyMode() and the click handler can read the
+// same name; both “stop tour” and “stop spotlight” converge on this.
+const stopTour = stopSpotlight;
+const startTour = startSpotlight;
 
 // ---- 2D ↔ 3D in-place swap (no page reload) ----
 //
@@ -464,14 +554,10 @@ function applyMode(want3D) {
   if (want3D) setupPulseLayer();
   else teardownPulseLayer();
 
-  // 5. 3D-only floating UI: show the first-visit hint (if not dismissed)
-  //    on entry; stop the tour + clear any visible hint on exit.
-  if (want3D) {
-    showHint();
-  } else {
-    dismissHint(false);
-    if (tourActive) stopTour();
-  }
+  // 5. 3D-only floating UI: stop any active spotlight on exit. The button
+  //    visibility is pure CSS (body.is-3d gate) so it appears/disappears
+  //    automatically with the mode.
+  if (!want3D && tourActive) stopSpotlight();
 }
 
 // ---- 3D pulse animation on the most-critical facilities ----
@@ -779,6 +865,10 @@ function applyFilters() {
     if (s && !dname.includes(s)) return false;
     return true;
   });
+  // The spotlight reel is derived from filteredFeatures, so a filter change
+  // means the cached queue is stale. Drop it; the next Spotlight click
+  // rebuilds against the new view.
+  invalidateSpotlightQueue();
   updateMap();
   renderStats();
   renderTopList();
@@ -1446,6 +1536,11 @@ async function switchCountry(iso3) {
   const v = VIEWS[iso3] || VIEWS.NGA;
   const newName = COUNTRY_NAMES[iso3] || iso3;
 
+  // Drop any cached spotlight queue + halt an active spotlight — the user's
+  // country switch is the more recent intent and a resumed spotlight would
+  // otherwise fly to facilities from the previous country.
+  invalidateSpotlightQueue();
+
   // --- 1. SYNCHRONOUS UI RESET (runs immediately, no await) --------------
   // Update every piece of text that references the country name NOW so the
   // UI isn't showing stale country info during the async fetch below.
@@ -1510,37 +1605,27 @@ async function switchCountry(iso3) {
 document.addEventListener("DOMContentLoaded", () => {
   wireViewToggle();
 
-  // 3D floating-UI wiring. Buttons live in the HTML of both pages so the
-  // in-place toggle reaches them; we just wire their handlers once here.
-  const hintClose = document.getElementById("hint-close");
-  if (hintClose) hintClose.addEventListener("click", () => dismissHint(true));
-
+  // 3D floating-UI wiring. Button lives in the HTML of both pages so the
+  // in-place toggle reaches it; we just wire its handler once here.
   const tourBtn = document.getElementById("btn-tour");
   if (tourBtn) tourBtn.addEventListener("click", () => {
-    if (tourActive) stopTour();
-    else startTour();
+    if (tourActive) stopSpotlight();
+    else startSpotlight();
   });
 
-  // User interaction with the map cancels both the hint and the tour — the
-  // hint because the user has clearly figured out the controls, the tour
-  // because they want manual control. These events fire only for genuine
-  // user-initiated input, not for our own easeTo/flyTo calls.
-  map.on("dragstart", () => {
-    if (tourActive) stopTour();
-    dismissHint(true);
-  });
-  map.on("wheel", () => {
-    if (tourActive) stopTour();
-    dismissHint(true);
-  });
-  map.on("touchstart", () => {
-    if (tourActive) stopTour();
-    dismissHint(true);
-  });
-
-  // Initial-load hint: if /3d/ was the landing page, show the hint after
-  // a short delay so it doesn't fight with the data-loading state.
-  if (IS_3D) setTimeout(showHint, 800);
+  // User interaction with the map cancels the spotlight. We listen at the
+  // raw map-event layer (mousedown / wheel / touchstart) rather than
+  // "dragstart" because dragstart can be unreliable when our own
+  // setBearing/easeTo is running — the user mousedown is the earliest,
+  // most reliable signal of “they want to take over.” Filter out events
+  // that originated on the spotlight popup so clicking inside the popup
+  // doesn't cancel.
+  function cancelOnUser(e) {
+    if (tourActive) stopSpotlight();
+  }
+  map.on("mousedown", cancelOnUser);
+  map.on("wheel", cancelOnUser);
+  map.on("touchstart", cancelOnUser);
 
   document.getElementById("country").addEventListener("change", e => switchCountry(e.target.value));
   // State dropdown toggle
