@@ -666,7 +666,12 @@ body.is-3d .map-tour-btn { display: inline-flex; }
 
 /* Spotlight popup — a custom MapLibre popup style for the per-site
    informational tag that appears when the spotlight lands on each
-   facility. Designed to read at a glance from a tilted camera. */
+   facility. Designed to read at a glance from a tilted camera.
+
+   Animation: the content fades + scales in on mount. We animate the inner
+   content node rather than the popup root because MapLibre uses transform
+   on the root for positioning — a transform-based animation there would
+   fight the placement math and the popup would briefly mis-anchor. */
 .maplibregl-popup.spotlight-popup .maplibregl-popup-content {
   background: rgba(20, 25, 38, 0.96);
   border: 1px solid var(--rule);
@@ -678,6 +683,13 @@ body.is-3d .map-tour-btn { display: inline-flex; }
   -webkit-backdrop-filter: blur(12px);
   min-width: 220px;
   font-family: inherit;
+  animation: spotlight-pop-in 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: bottom center;
+}
+@keyframes spotlight-pop-in {
+  from { opacity: 0; }
+  60%  { opacity: 1; }
+  to   { opacity: 1; }
 }
 .maplibregl-popup.spotlight-popup .maplibregl-popup-tip {
   border-top-color: rgba(20, 25, 38, 0.96);

@@ -321,17 +321,32 @@ function cinematicFlyTo(opts) {
 //
 // Why "Spotlight critical sites" instead of "Take the tour": the verb
 // promises something specific (a curated highlight reel) instead of
-// implying the platform needs to be explained. "Stop spotlight" while
-// active.
-const SPOTLIGHT_TOP_N = 5;          // most-critical facilities in the highlight reel
-const SPOTLIGHT_CONTRAST_LOW_N = 1; // bottom-N to fly to last for context
-const SPOTLIGHT_FLY_MS = 2400;      // travel time between stops
-const SPOTLIGHT_DWELL_MS = 5500;    // popup pause at each stop
+// implying the platform needs to be explained.
+//
+// Storytelling pacing — the reel is composed of three movements:
+//   1. INTRO  — globe spin for ~3s to set the scene before the first dive.
+//                Only on a fresh run; resumes skip the intro.
+//   2. ARC    — between every two stops, a high-curve flyTo that pulls the
+//                camera out into space, rotates it, then dives back down.
+//                The high curve (>2) is what gives MapLibre's flyTo the
+//                pronounced parabolic-through-low-zoom-space feel; without
+//                it transitions feel like 2D snaps even on the globe.
+//   3. DWELL  — popup hold at each facility, kept short (3s) so the reel
+//                stays propulsive rather than tutorial-paced.
+const SPOTLIGHT_TOP_N = 5;
+const SPOTLIGHT_CONTRAST_LOW_N = 1;
+const SPOTLIGHT_INTRO_MS = 3000;     // opening globe spin
+const SPOTLIGHT_INTRO_BEARING = 70;  // degrees swept during the intro
+const SPOTLIGHT_FLY_MS = 3200;       // travel time per arc
+const SPOTLIGHT_FLY_CURVE = 2.2;     // higher = more pronounced pull-out-then-dive
+const SPOTLIGHT_FLY_BEARING_SPREAD = 60; // bearing jitter per arc, in degrees
+const SPOTLIGHT_DWELL_MS = 3000;     // popup dwell per facility
 let tourActive = false;
 let spotlightQueue = [];     // ordered array of facility features to visit
 let spotlightIdx = 0;        // index of the NEXT stop to visit (resume token)
 let spotlightTimer = null;   // setTimeout handle for the schedule chain
 let spotlightPopup = null;   // active maplibregl.Popup instance
+let spotlightIsFreshRun = true; // false when resuming mid-reel after stop
 
 function buildSpotlightQueue() {
   // Pull from the CURRENT filtered set so the spotlight always reflects
@@ -368,17 +383,49 @@ function setTourButtonState(active) {
 
 function startSpotlight() {
   if (!IS_3D || tourActive) return;
-  // Rebuild the queue if it's empty (first run, or after a country/filter change).
-  // Keep the existing queue if we're resuming — spotlightIdx points at the next
-  // unvisited stop and we want to continue from there.
+  // Rebuild the queue if it's empty (first run, or after a country/filter
+  // change). Keep the existing queue if we're resuming — spotlightIdx points
+  // at the next unvisited stop and we want to continue from there. The
+  // intro spin only plays on a fresh run; resumes skip it and dive into
+  // the next site directly, which matches the pause/play model.
   if (spotlightQueue.length === 0 || spotlightIdx >= spotlightQueue.length) {
     spotlightQueue = buildSpotlightQueue();
     spotlightIdx = 0;
+    spotlightIsFreshRun = true;
+  } else {
+    spotlightIsFreshRun = false;
   }
   if (spotlightQueue.length === 0) return;
   tourActive = true;
   setTourButtonState(true);
-  visitNextSpotlightStop();
+
+  if (spotlightIsFreshRun) {
+    playSpotlightIntro();
+  } else {
+    visitNextSpotlightStop();
+  }
+}
+
+// 3-second world-spin that opens a fresh spotlight reel. Pulls the camera
+// back to the country overview at a tilted pitch and sweeps the bearing by
+// SPOTLIGHT_INTRO_BEARING degrees — enough to read as motion but not so
+// much it feels rushed. Storytelling beat: “here is the country, here is
+// what we are about to show you.” Then we flyTo the first critical site.
+function playSpotlightIntro() {
+  const iso = currentData?.metadata?.iso3 || "NGA";
+  const v = VIEWS[iso] || VIEWS.NGA;
+  const startBearing = map.getBearing();
+  map.easeTo({
+    center: v.center,
+    zoom: Math.max(v.zoom - 1.0, 3.5),
+    pitch: 60,
+    bearing: startBearing + SPOTLIGHT_INTRO_BEARING,
+    duration: SPOTLIGHT_INTRO_MS,
+  });
+  spotlightTimer = setTimeout(() => {
+    if (!tourActive) return;
+    visitNextSpotlightStop();
+  }, SPOTLIGHT_INTRO_MS + 100);
 }
 
 function visitNextSpotlightStop() {
@@ -390,21 +437,25 @@ function visitNextSpotlightStop() {
   const f = spotlightQueue[spotlightIdx];
   const [lng, lat] = f.geometry.coordinates;
 
-  // Phase 1: cinematic fly into the facility. Slight bearing jitter each
-  // stop so consecutive flights don't look identical.
+  // Arc fly: SPOTLIGHT_FLY_CURVE = 2.2 makes MapLibre's flyTo pull the
+  // camera UP through low-zoom space then back down to the target — the
+  // “spin out and dive back in” feel between sites. Slow speed + long
+  // duration sustain the arc; without these the flyTo would snap.
+  // Bearing jitter (±SPOTLIGHT_FLY_BEARING_SPREAD/2) ensures consecutive
+  // arcs don't look identical.
+  const bearingDelta = (Math.random() - 0.5) * SPOTLIGHT_FLY_BEARING_SPREAD;
   map.flyTo({
     center: [lng, lat],
     zoom: 11,
     pitch: 65,
-    bearing: map.getBearing() + (Math.random() * 40 - 20),
+    bearing: map.getBearing() + bearingDelta,
     duration: SPOTLIGHT_FLY_MS,
-    curve: 1.5,
-    speed: 0.7,
+    curve: SPOTLIGHT_FLY_CURVE,
+    speed: 0.55,
     essential: true,
   });
 
-  // Phase 2: small buffer after fly completes, then show the popup and
-  // dwell. Phase 3: hide popup and advance.
+  // After the fly completes, show the popup and dwell. Then advance.
   spotlightTimer = setTimeout(() => {
     if (!tourActive) return;
     showSpotlightPopup(f);
@@ -412,10 +463,10 @@ function visitNextSpotlightStop() {
       if (!tourActive) return;
       hideSpotlightPopup();
       spotlightIdx++;
-      // Tiny gap before the next fly so the popup teardown reads clean.
-      spotlightTimer = setTimeout(visitNextSpotlightStop, 250);
+      // Tiny gap so the popup fade-out reads cleanly before the next arc.
+      spotlightTimer = setTimeout(visitNextSpotlightStop, 220);
     }, SPOTLIGHT_DWELL_MS);
-  }, SPOTLIGHT_FLY_MS + 200);
+  }, SPOTLIGHT_FLY_MS + 150);
 }
 
 function showSpotlightPopup(f) {
@@ -460,18 +511,22 @@ function hideSpotlightPopup() {
 }
 
 function finishSpotlight() {
-  // End of the curated reel — ease back to the country overview.
+  // End of the curated reel — arc back out to the country overview so the
+  // reel ends on the same wide framing it opened on. Higher curve so the
+  // exit feels like a final pullback into space, not just a flat zoom-out.
   const iso = currentData?.metadata?.iso3 || "NGA";
   const v = VIEWS[iso] || VIEWS.NGA;
   map.flyTo({
     center: v.center,
     zoom: Math.max(v.zoom - 1.0, 3.5),
     pitch: 55,
-    bearing: 0,
-    duration: 2500,
+    bearing: map.getBearing(),  // keep current rotation rather than snap to 0
+    duration: 2800,
+    curve: 1.8,
+    speed: 0.7,
   });
   stopSpotlight();
-  // Reset for next run — next click rebuilds the queue from scratch.
+  // Reset for next run — next click plays the intro spin again, rebuilds queue.
   spotlightIdx = 0;
   spotlightQueue = [];
 }
