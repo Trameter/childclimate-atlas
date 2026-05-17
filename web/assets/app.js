@@ -1192,22 +1192,11 @@ function updateMap() {
     55, "#D9894F",  // high
     75, "#C35248"]; // severe
 
-  // promoteId hoists properties.id to the feature's top-level id slot so
-  // MapLibre's setFeatureState() can target it for hover/selected/etc.
-  // Without this, feature-state can't be set per-dot and we can't drive
-  // paint expressions on a per-feature basis.
-  map.addSource("facilities", { type: "geojson", data: geojson, promoteId: "id" });
+  map.addSource("facilities", { type: "geojson", data: geojson });
   map.addLayer({
     id: "facilities-glow", type: "circle", source: "facilities",
     paint: {
-      // Hover scales the glow up too, otherwise the bright halo would lag
-      // behind the enlarged dot.
-      "circle-radius": [
-        "case",
-        ["boolean", ["feature-state", "hover"], false],
-        ["interpolate", ["linear"], ["zoom"], 6, 10, 10, 18, 14, 26],
-        ["interpolate", ["linear"], ["zoom"], 6,  6, 10, 12, 14, 18],
-      ],
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 6, 10, 12, 14, 18],
       "circle-color": RISK_STOPS,
       "circle-blur": 0.8, "circle-opacity": 0.32,
     },
@@ -1215,22 +1204,10 @@ function updateMap() {
   map.addLayer({
     id: "facilities", type: "circle", source: "facilities",
     paint: {
-      // Hover scale-up: 50% bigger when the feature-state hover is true.
-      // Pure GPU-side expression so it's smooth even at 50k+ dots.
-      "circle-radius": [
-        "case",
-        ["boolean", ["feature-state", "hover"], false],
-        ["interpolate", ["linear"], ["zoom"], 6, 5, 10, 9, 14, 15],
-        ["interpolate", ["linear"], ["zoom"], 6, 3, 10, 6, 14, 10],
-      ],
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 3, 10, 6, 14, 10],
       "circle-color": RISK_STOPS,
       "circle-stroke-color": "rgba(30,36,51,0.85)",  // var(--ink) at 85%
-      "circle-stroke-width": [
-        "case",
-        ["boolean", ["feature-state", "hover"], false],
-        2.0,
-        1.2,
-      ],
+      "circle-stroke-width": 1.2,
     },
   });
 
@@ -1259,38 +1236,15 @@ function updateMap() {
     highlightFacility(full);
     renderDetail(full);
   });
-  // Track which facility is currently hovered so we can clear its
-  // feature-state when the cursor moves to another dot or off the layer.
-  let hoveredFeatureId = null;
-  function clearHover() {
-    if (hoveredFeatureId !== null) {
-      map.setFeatureState({ source: "facilities", id: hoveredFeatureId }, { hover: false });
-      hoveredFeatureId = null;
-    }
-  }
-  map.on("mousemove", "facilities", e => {
+  map.on("mouseenter", "facilities", e => {
     map.getCanvas().style.cursor = "pointer";
     if (!e.features.length) return;
-    const f = e.features[0];
-    const id = f.id;
-    if (id === hoveredFeatureId) {
-      // Same dot; just update the popup position (it follows the cursor).
-      popup.setLngLat(e.lngLat);
-      return;
-    }
-    clearHover();
-    hoveredFeatureId = id;
-    map.setFeatureState({ source: "facilities", id }, { hover: true });
-    const p = f.properties;
+    const p = e.features[0].properties;
     popup.setLngLat(e.lngLat)
-      .setHTML(`<b>${escapeHtml(displayName(f))}</b><br/>${typeIcon(p.facility_type)} ${escapeHtml(p.facility_type)} &middot; <span style="color:${bandColor(p.risk_score)};font-weight:700">${p.risk_score}</span>`)
+      .setHTML(`<b>${escapeHtml(displayName(e.features[0]))}</b><br/>${typeIcon(p.facility_type)} ${escapeHtml(p.facility_type)} &middot; <span style="color:${bandColor(p.risk_score)};font-weight:700">${p.risk_score}</span>`)
       .addTo(map);
   });
-  map.on("mouseleave", "facilities", () => {
-    map.getCanvas().style.cursor = "";
-    clearHover();
-    popup.remove();
-  });
+  map.on("mouseleave", "facilities", () => { map.getCanvas().style.cursor = ""; popup.remove(); });
 }
 
 // ---- sidebar: stats ----
