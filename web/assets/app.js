@@ -983,6 +983,9 @@ function populateStates(features) {
       panel.querySelectorAll(".state-opt").forEach(o => o.classList.remove("sel"));
       opt.classList.add("sel");
       panel.classList.remove("open");
+      // URL mirrors state filter so a Bangladesh-state-of-Dhaka share link
+      // lands the recipient on the same filtered view. Empty val clears.
+      setUrlParam("state", val);
       updateSearchPlaceholder();
       applyFilters();
       zoomToFiltered();
@@ -1343,7 +1346,7 @@ function highlightFacility(feature) {
   // Reflect the selection in the URL so the current view is shareable.
   // Null/clear is handled separately by closeDetail() so we don't strip
   // the param every time the selection is just being moved.
-  if (feature) setFacilityUrlParam(feature.properties.id);
+  if (feature) setUrlParam("facility", feature.properties.id);
   const geojson = {
     type: "FeatureCollection",
     features: feature ? [{
@@ -1567,30 +1570,48 @@ function closeDetail() {
   highlightFacility(null);
   // Drop the ?facility= param so a shared URL after close doesn't reopen
   // a closed panel on reload.
-  setFacilityUrlParam(null);
+  setUrlParam("facility", null);
   // Update map size after CSS transition
   setTimeout(() => map.resize(), 260);
 }
 
-// ---- Shareable facility URLs ----
+// ---- Shareable URLs: country + state + facility ----
 //
-// `/3d/?country=NGA&facility=grid3-clinic-XYZ` (or `/?country=...&facility=...`
-// for 2D) opens straight to that facility: detail panel rendered, camera
-// flown to the dot, highlight ring set. Country is explicit because IDs
-// don't always encode it. Any in-app facility selection updates the URL
-// via history.replaceState so the URL bar always reflects what's on screen
-// — share at any moment and the recipient lands on the same view.
-function setFacilityUrlParam(id) {
+// The URL bar mirrors the current view, three params deep:
+//   ?country=NGA               → atlas of Nigeria, no filter
+//   ?country=BGD&state=Dhaka   → Bangladesh, Dhaka state filter
+//   ?country=NGA&facility=grid3-clinic-XYZ  → specific facility opened
+//
+// Any in-app state change (country switch, state filter, facility click,
+// detail close) calls setUrlParam to keep the URL bar honest. On initial
+// page load, parseInitialUrlState() reads the URL once and the app
+// dispatches accordingly: switches country, applies state filter, opens
+// facility. Subsequent navigation is user-driven — URL just reflects the
+// current view, doesn't drive it.
+function setUrlParam(key, value) {
   const url = new URL(window.location.href);
-  if (id) {
-    url.searchParams.set("country", currentData?.metadata?.iso3 || "NGA");
-    url.searchParams.set("facility", id);
+  if (value === null || value === undefined || value === "") {
+    url.searchParams.delete(key);
   } else {
-    url.searchParams.delete("facility");
-    // Keep country in URL for shareability of the country view.
+    url.searchParams.set(key, value);
   }
   history.replaceState(null, "", url.toString());
 }
+
+// Captured ONCE at module init so country + state + facility from the
+// landing URL can be applied in sequence as data becomes available
+// (country needs to switch first, state filter waits for data, facility
+// waits for state). Cleared after the initial load completes; subsequent
+// switches don't re-read these.
+const _initialUrl = (() => {
+  const params = new URL(window.location.href).searchParams;
+  return {
+    country: params.get("country"),
+    state: params.get("state"),
+    facility: params.get("facility"),
+  };
+})();
+let _initialUrlConsumed = false;
 
 // Read ?facility= from the current URL after data is ready, find the
 // matching feature in the loaded set, and open it. Returns true if a
@@ -1899,6 +1920,16 @@ async function switchCountry(iso3) {
   dataReady = false;
   pendingSpotlightStart = false;
   showMapLoading();
+  // URL mirrors the country switch immediately, even before data loads.
+  // State is cleared because the new country has its own state set.
+  setUrlParam("country", iso3);
+  // On user-driven switches, drop stale state/facility from the URL
+  // (they don't apply to the new country). On the initial load we DON'T
+  // touch them yet — _initialUrl below applies them after data lands.
+  if (_initialUrlConsumed) {
+    setUrlParam("state", null);
+    setUrlParam("facility", null);
+  }
 
   // --- 1. SYNCHRONOUS UI RESET (runs immediately, no await) --------------
   // Update every piece of text that references the country name NOW so the
@@ -1961,6 +1992,18 @@ async function switchCountry(iso3) {
   // a beat to appear before the intro spin starts arcing across them).
   dataReady = true;
   hideMapLoading();
+
+  // If the landing URL specified a state, apply it now that the state
+  // panel has been populated (populateStates above). Programmatic click
+  // on the matching .state-opt fires the existing handler which sets
+  // activeFilters.state + URL + button label + .sel class + filter run.
+  if (!_initialUrlConsumed && _initialUrl.state) {
+    const wantedState = _initialUrl.state;
+    const opt = document.querySelector(`.state-opt[data-value="${CSS.escape(wantedState)}"]`);
+    if (opt) opt.click();
+  }
+  _initialUrlConsumed = true;
+
   // If the URL has ?facility=X, open it now that we know X is loadable.
   openFacilityFromUrl();
   if (pendingSpotlightStart) {
@@ -2229,5 +2272,14 @@ document.addEventListener("click", (e) => {
   }
 });
 
-// Load data immediately — don't wait for map tiles.
-switchCountry("NGA");
+// Load data immediately — don't wait for map tiles. The country is taken
+// from the landing URL if present + valid, otherwise NGA. The country
+// <select> is set to match so the dropdown reflects what's loading.
+(() => {
+  const validCountries = Object.keys(VIEWS);  // ["NGA", "BGD", "GTM"]
+  const fromUrl = _initialUrl.country;
+  const iso = fromUrl && validCountries.includes(fromUrl) ? fromUrl : "NGA";
+  const sel = document.getElementById("country");
+  if (sel) sel.value = iso;
+  switchCountry(iso);
+})();
