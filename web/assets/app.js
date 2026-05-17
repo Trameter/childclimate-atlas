@@ -426,7 +426,7 @@ function setTourButtonState() {
   if (icon) icon.textContent = isRunning ? "■" : "▶";
   if (label) {
     label.textContent = isPaused
-      ? "Resume spotlight"
+      ? "Paused"
       : (isRunning ? "Stop spotlight" : "Spotlight critical sites");
   }
 }
@@ -600,7 +600,6 @@ function showSpotlightPopup(f) {
           ${topDriver ? `<span class="driver">${escapeHtml(topDriver)}</span>` : ""}
         </div>
         ${loc ? `<div class="location">${escapeHtml(loc)}</div>` : ""}
-        <div class="open-hint">Click for details</div>
       </div>
     `)
     .addTo(map);

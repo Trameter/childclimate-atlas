@@ -68,9 +68,14 @@ button { font-family: inherit; }
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 28px;
   border-bottom: 1px solid var(--rule);
-  background: rgba(30, 36, 51, 0.92);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  /* Solid background, no backdrop-filter. The previous translucent ink
+     (0.92 alpha) + blur(10px) was a frosted-glass effect that read fine
+     against a uniformly dark map but, on /3d when the camera tilts up
+     and the atmospheric horizon glow reaches the top of the viewport,
+     the 8% transparency let the bright atmosphere bleed through as a
+     milky white wash. Solid ink-2 is consistent across both modes and
+     in every camera state. */
+  background: var(--ink-2);
   height: var(--topbar-h);
 }
 .brand {
@@ -750,19 +755,6 @@ body.is-3d .map-tour-btn { display: inline-flex; }
   font-family: "JetBrains Mono", ui-monospace, monospace;
   letter-spacing: 0.04em;
 }
-.spotlight-pop .open-hint {
-  color: var(--ember);
-  font-size: 10.5px;
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid var(--rule);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  font-weight: 500;
-  opacity: 0.85;
-}
-
 /* Paused state of the spotlight button — use a hold-pattern feel so it
    reads differently from both idle and active. Same overall pill shape
    but with a muted background tint. */
