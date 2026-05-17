@@ -1099,7 +1099,7 @@ body.has-detail #detail.detail {
 }
 
 .detail-section {
-  padding: 18px 22px;
+  padding: 22px 22px;
   border-bottom: 1px solid var(--rule);
 }
 .detail-section:last-child { border-bottom: 0; }
