@@ -1726,11 +1726,21 @@ function computeDrivers(comps, weights, climate, air) {
   });
 }
 
+// Tracks the active MicroScene instance so we can dispose it on re-render
+// or panel close. Without this, every facility click leaks a WebGL context
+// and we'd hit the 16-context browser cap after ~16 facility opens.
+let _activeMicroScene = null;
+
 function renderDetail(feature) {
   const p = feature.properties;
   const s = p.risk_score;
   const b = band(s);
   const weights = currentData.metadata.scoring_weights || {};
+  // Tear down any prior micro-scene (different facility just got clicked).
+  if (_activeMicroScene) {
+    _activeMicroScene.dispose();
+    _activeMicroScene = null;
+  }
   const comps = typeof p.risk_components === "string" ? JSON.parse(p.risk_components) : (p.risk_components || {});
   const climate = typeof p.climate === "string" ? JSON.parse(p.climate) : (p.climate || {});
   const air = typeof p.air === "string" ? JSON.parse(p.air) : (p.air || {});
@@ -1839,6 +1849,15 @@ function renderDetail(feature) {
       </div>
     </div>
 
+    <!-- Micro-scene: a small Three.js vignette that procedurally visualises
+         the facility's dominant climate stressor (heat / drought / flood /
+         PM2.5). Built by MicroScene.create() right after this innerHTML
+         settles into the DOM. -->
+    <div class="microscene">
+      <canvas class="microscene-canvas" id="microscene-canvas"></canvas>
+      <div class="microscene-label" id="microscene-label"></div>
+    </div>
+
     <div class="detail-section">
       <h4>Score breakdown</h4>
       ${breakdown}
@@ -1865,12 +1884,37 @@ function renderDetail(feature) {
   document.querySelector(".detail-wrap")?.setAttribute("aria-hidden", "false");
   // Trigger map resize so MapLibre recalculates center/zoom for the narrower canvas
   setTimeout(() => map.resize(), 260);
+
+  // Spin up the micro-scene now that the canvas is in the DOM with its
+  // final dimensions. Guarded for the case where the global isn't loaded
+  // (script-load failure) — the rest of the panel still works.
+  if (typeof MicroScene !== "undefined" && MicroScene.create) {
+    const canvas = document.getElementById("microscene-canvas");
+    const label  = document.getElementById("microscene-label");
+    if (canvas) {
+      _activeMicroScene = MicroScene.create(canvas, p, weights);
+      if (_activeMicroScene && label) {
+        label.textContent = _activeMicroScene.label;
+      } else if (label) {
+        // No dominant stress (all components zero / missing). Hide the
+        // whole microscene block so it doesn't sit there empty.
+        const wrap = canvas.closest(".microscene");
+        if (wrap) wrap.style.display = "none";
+      }
+    }
+  }
 }
 
 // Close/hide the right panel
 function closeDetail() {
   document.body.classList.remove("has-detail");
   document.querySelector(".detail-wrap")?.setAttribute("aria-hidden", "true");
+  // Dispose the micro-scene's WebGL resources — critical to avoid
+  // exhausting the 16-context browser limit after many facility opens.
+  if (_activeMicroScene) {
+    _activeMicroScene.dispose();
+    _activeMicroScene = null;
+  }
   // Clear the selected-facility highlight ring
   highlightFacility(null);
   // Drop the ?facility= param so a shared URL after close doesn't reopen
