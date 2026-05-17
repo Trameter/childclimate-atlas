@@ -22,6 +22,12 @@
   <meta name="twitter:image" content="https://climate-atlas.trameter.com/docs/atlas-3d-screenshot.jpg" />
 
   <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+  <!-- Preload the default-country GeoJSON so the fetch starts in parallel
+       with JS download/parse. Without this the browser only knows to fetch
+       the data once app.js executes, leaving the map dot-less for ~3s on
+       first paint. crossorigin="anonymous" is required for as="fetch" to
+       match the actual fetch() call in JS so the resource isn't re-fetched. -->
+  <link rel="preload" href="/data/NGA.geojson" as="fetch" type="application/geo+json" crossorigin="anonymous" />
   <link rel="stylesheet" href="/assets/vendor/maplibre-gl@5.24.0/maplibre-gl.css" />
   <link rel="stylesheet" href="/assets/style.css" />
 </head>

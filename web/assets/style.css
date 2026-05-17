@@ -739,6 +739,31 @@ body.is-3d .map-tour-btn { display: inline-flex; }
   font-family: "JetBrains Mono", ui-monospace, monospace;
   letter-spacing: 0.04em;
 }
+.spotlight-pop .open-hint {
+  color: var(--ember);
+  font-size: 10.5px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rule);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+/* Paused state of the spotlight button — use a hold-pattern feel so it
+   reads differently from both idle and active. Same overall pill shape
+   but with a muted background tint. */
+.map-tour-btn.paused {
+  background: rgba(216, 123, 79, 0.16);
+  border-color: var(--ember);
+  color: var(--ember);
+}
+.map-tour-btn.paused:hover {
+  background: rgba(216, 123, 79, 0.25);
+  color: var(--paper);
+}
 
 @media (max-width: 820px) {
   .map-tour-btn { padding: 9px 16px; font-size: 12px; bottom: 16px; }

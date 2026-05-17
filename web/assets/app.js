@@ -362,6 +362,10 @@ const SPOTLIGHT_OUTRO_PULLBACK_MS = 4500; // phase 1 of close: pull to globe + s
 const SPOTLIGHT_OUTRO_SETTLE_MS = 4800;   // phase 2 of close: settle to country
 const SPOTLIGHT_OUTRO_BEARING = 75;       // bearing sweep during pullback
 let tourActive = false;
+let spotlightPaused = false; // true when user clicked into a popup; resume
+                             // continues from the next stop. Distinct from
+                             // tourActive=false (full stop) — paused keeps
+                             // the queue + index so resume picks back up.
 let spotlightQueue = [];     // ordered array of facility features to visit
 let spotlightIdx = 0;        // index of the NEXT stop to visit (resume token)
 let spotlightTimer = null;   // setTimeout handle for the schedule chain
@@ -400,14 +404,26 @@ function invalidateSpotlightQueue() {
   if (tourActive) stopSpotlight();
 }
 
-function setTourButtonState(active) {
+// Three button states:
+//   idle     — “▶ Spotlight critical sites”  (no reel active)
+//   running  — “■ Stop spotlight”           (reel playing, click to halt)
+//   paused   — “▶ Resume spotlight”          (user clicked a popup, drilled
+//                                              into detail; click to continue)
+function setTourButtonState() {
   const btn = document.getElementById("btn-tour");
   if (!btn) return;
-  btn.classList.toggle("active", active);
+  const isRunning = tourActive && !spotlightPaused;
+  const isPaused = tourActive && spotlightPaused;
+  btn.classList.toggle("active", isRunning);
+  btn.classList.toggle("paused", isPaused);
   const icon = btn.querySelector(".tour-icon");
   const label = btn.querySelector(".tour-label");
-  if (icon) icon.textContent = active ? "■" : "▶";
-  if (label) label.textContent = active ? "Stop spotlight" : "Spotlight critical sites";
+  if (icon) icon.textContent = isRunning ? "■" : "▶";
+  if (label) {
+    label.textContent = isPaused
+      ? "Resume spotlight"
+      : (isRunning ? "Stop spotlight" : "Spotlight critical sites");
+  }
 }
 
 function startSpotlight() {
@@ -426,13 +442,41 @@ function startSpotlight() {
   }
   if (spotlightQueue.length === 0) return;
   tourActive = true;
-  setTourButtonState(true);
+  spotlightPaused = false;
+  setTourButtonState();
 
   if (spotlightIsFreshRun) {
     playSpotlightIntro();
   } else {
     visitNextSpotlightStop();
   }
+}
+
+// Soft pause: user clicked a popup so they could drill into the detail
+// panel. Keep the queue + index, halt the dwell timer + the camera, and
+// flip the button to “Resume spotlight”. The next click on the button
+// (or closing the detail panel) calls resumeSpotlight() to continue.
+function pauseSpotlight() {
+  if (!tourActive || spotlightPaused) return;
+  spotlightPaused = true;
+  setTourButtonState();
+  if (spotlightTimer !== null) {
+    clearTimeout(spotlightTimer);
+    spotlightTimer = null;
+  }
+  hideSpotlightPopup(); // detail panel takes over the role of the popup
+  map.stop();           // halt any in-flight camera animation
+}
+
+function resumeSpotlight() {
+  if (!tourActive || !spotlightPaused) return;
+  spotlightPaused = false;
+  setTourButtonState();
+  // Advance past the stop the user just drilled into — they've already
+  // seen that one in full detail, no need to re-visit. The brief setTimeout
+  // gives the close-detail animation a beat to start.
+  spotlightIdx++;
+  spotlightTimer = setTimeout(visitNextSpotlightStop, 250);
 }
 
 // 3-second world-spin that opens a fresh spotlight reel. Pulls the camera
@@ -454,10 +498,15 @@ function playSpotlightIntro() {
     bearing: startBearing - SPOTLIGHT_INTRO_BEARING,
     duration: SPOTLIGHT_INTRO_MS,
   });
-  spotlightTimer = setTimeout(() => {
-    if (!tourActive) return;
+  // Chain the first dive via moveend (fires the instant the easeTo settles)
+  // instead of a setTimeout buffer that left a perceptible pause between
+  // the intro completing and the dive starting. once() means it only hooks
+  // the next fire, so subsequent moveend events from facility flights don't
+  // re-trigger this handler.
+  map.once("moveend", () => {
+    if (!tourActive || spotlightPaused) return;
     visitNextSpotlightStop();
-  }, SPOTLIGHT_INTRO_MS + 100);
+  });
 }
 
 function visitNextSpotlightStop() {
@@ -487,10 +536,14 @@ function visitNextSpotlightStop() {
   // arcs don't look identical. We don't bias direction — random across
   // both sides feels more organic than always clockwise.
   const bearingDelta = (Math.random() - 0.5) * SPOTLIGHT_FLY_BEARING_SPREAD;
+  // Higher end-pitch (72) and closer end-zoom (12) make each landing feel
+  // like a drone settling down at the site — the camera tilts forward as it
+  // descends instead of just zooming in flat. Combined with the high arc
+  // curve, this is what reads as a true 3D approach rather than 2D zoom.
   map.flyTo({
     center: [lng, lat],
-    zoom: 11,
-    pitch: 65,
+    zoom: 12,
+    pitch: 72,
     bearing: map.getBearing() + bearingDelta,
     duration: flyMs,
     curve: flyCurve,
@@ -542,9 +595,27 @@ function showSpotlightPopup(f) {
           ${topDriver ? `<span class="driver">${escapeHtml(topDriver)}</span>` : ""}
         </div>
         ${loc ? `<div class="location">${escapeHtml(loc)}</div>` : ""}
+        <div class="open-hint">Click for details</div>
       </div>
     `)
     .addTo(map);
+
+  // Click the popup to open the full detail panel + pause the spotlight.
+  // Handler is attached to the popup's outer element so any click within
+  // its bounds triggers it. stopPropagation prevents the click from also
+  // hitting the map's mousedown cancellation path (which would fully stop
+  // the spotlight instead of pausing it).
+  const popupEl = spotlightPopup.getElement();
+  if (popupEl) {
+    popupEl.style.cursor = "pointer";
+    popupEl.addEventListener("mousedown", e => e.stopPropagation());
+    popupEl.addEventListener("click", e => {
+      e.stopPropagation();
+      pauseSpotlight();
+      highlightFacility(f);
+      renderDetail(f);
+    });
+  }
 }
 
 function hideSpotlightPopup() {
@@ -599,7 +670,8 @@ function finishSpotlight() {
 function stopSpotlight(haltCamera = true) {
   if (!tourActive) return;
   tourActive = false;
-  setTourButtonState(false);
+  spotlightPaused = false;
+  setTourButtonState();
   hideSpotlightPopup();
   if (spotlightTimer !== null) {
     clearTimeout(spotlightTimer);
@@ -1731,7 +1803,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // in-place toggle reaches it; we just wire its handler once here.
   const tourBtn = document.getElementById("btn-tour");
   if (tourBtn) tourBtn.addEventListener("click", () => {
-    if (tourActive) stopSpotlight();
+    // Three-way: paused -> resume, running -> stop, idle -> start.
+    if (tourActive && spotlightPaused) resumeSpotlight();
+    else if (tourActive) stopSpotlight();
     else startSpotlight();
   });
 
@@ -1809,9 +1883,14 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btn-csv").addEventListener("click", exportCSV);
   document.getElementById("btn-geojson").addEventListener("click", exportGeoJSON);
 
-  // detail-panel close button
+  // detail-panel close button — also auto-resumes the spotlight if the user
+  // had paused it by clicking into a popup. Same behavior if Escape is used
+  // (the Escape handler below calls closeDetail directly).
   const closeBtn = document.getElementById("btn-close-detail");
-  if (closeBtn) closeBtn.addEventListener("click", closeDetail);
+  if (closeBtn) closeBtn.addEventListener("click", () => {
+    closeDetail();
+    if (tourActive && spotlightPaused) resumeSpotlight();
+  });
 
   // "/" keyboard shortcut → focus search input
   document.addEventListener("keydown", (e) => {
@@ -1823,8 +1902,11 @@ document.addEventListener("DOMContentLoaded", () => {
       document.getElementById("search")?.focus();
     }
     if (e.key === "Escape") {
-      // Close detail panel on Escape
-      if (document.body.classList.contains("has-detail")) closeDetail();
+      // Close detail panel on Escape — also resume spotlight if paused.
+      if (document.body.classList.contains("has-detail")) {
+        closeDetail();
+        if (tourActive && spotlightPaused) resumeSpotlight();
+      }
     }
   });
 
