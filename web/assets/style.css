@@ -1103,6 +1103,15 @@ body.has-detail #detail.detail {
   border-bottom: 1px solid var(--rule);
 }
 .detail-section:last-child { border-bottom: 0; }
+/* Small muted note under a section header — used to explain UI nuances
+   without dominating the panel's analytical content (e.g. why recs
+   reorder, why some drivers don't produce a fix). */
+.detail-section .section-note {
+  margin: -4px 0 14px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--paper-soft);
+}
 .detail-section h4 {
   margin: 0 0 14px;
   font-family: "Inter Tight";

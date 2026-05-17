@@ -1666,6 +1666,36 @@ function highlightFacility(feature) {
   map.getSource("selected").setData(geojson);
 }
 
+// Map each driver (sub-score key) to the recommendation category that
+// addresses it. Used by reorderRecsByDrivers so the Recommended-actions
+// list visually mirrors the Top-drivers list whenever possible. Drivers
+// without an entry here (child_density) have no facility-level fix —
+// the panel copy explains this.
+const DRIVER_TO_REC_CATEGORY = {
+  heat_exposure:      "Heat Resilience",
+  air_pollution:      "Air Quality",
+  flood_risk:         "Flood Resilience",
+  drought_risk:       "Water Security",
+  facility_fragility: "Facility Strengthening",
+  // child_density: intentionally absent — no facility-level fix.
+};
+
+// Reorder recs so they line up with the driver priority shown above.
+// Recs whose category matches the top driver come first; recs without
+// a driver match keep their original rule-priority order at the tail.
+function reorderRecsByDrivers(recs, drivers) {
+  const driverCats = drivers
+    .map(d => DRIVER_TO_REC_CATEGORY[d.key])
+    .filter(Boolean);
+  const idxOf = (cat) => {
+    const i = driverCats.indexOf(cat);
+    return i === -1 ? Number.POSITIVE_INFINITY : i;
+  };
+  // Stable sort: Array.prototype.sort is stable per spec, so ties preserve
+  // the original rule-priority order from the pipeline.
+  return [...recs].sort((a, b) => idxOf(a.category) - idxOf(b.category));
+}
+
 // ---- sidebar: detail panel ----
 // Build a human-readable "top drivers" list from the risk components + underlying inputs.
 function computeDrivers(comps, weights, climate, air) {
@@ -1790,8 +1820,12 @@ function renderDetail(feature) {
       <span class="p">${v}</span>
     </div>`).join("");
 
-  // Recommendations
-  const recHtml = recs.length ? recs.map((r, i) => `
+  // Recommendations — reordered to mirror the Top-drivers list so the user
+  // reads top driver → top recommendation, second driver → second rec, etc.
+  // Recs without a corresponding driver (e.g. fragility) keep their
+  // original rule-priority order at the tail.
+  const orderedRecs = reorderRecsByDrivers(recs, drivers);
+  const recHtml = orderedRecs.length ? orderedRecs.map((r, i) => `
     <div class="rec-card">
       <div class="top">
         <span class="pri">Priority ${String(i + 1).padStart(2, "0")}${r.category ? " · " + r.category : ""}</span>
@@ -1875,6 +1909,7 @@ function renderDetail(feature) {
 
     <div class="detail-section">
       <h4>Recommended actions · ranked</h4>
+      <p class="section-note">Ordered to mirror the drivers above. Some drivers (like child-population density) appear above only to explain the score — there's no facility-level fix for them, so they don't produce a recommendation here.</p>
       ${recHtml}
     </div>
   `;
