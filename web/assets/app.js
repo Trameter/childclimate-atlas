@@ -301,7 +301,7 @@ const map = new maplibregl.Map({
   style: _baseStyle,
   center: IS_3D ? [9.5, 5.0] : VIEWS.NGA.center,
   zoom: IS_3D ? 3.4 : VIEWS.NGA.zoom,
-  pitch: IS_3D ? 62 : 0,
+  pitch: IS_3D ? 40 : 0,
   bearing: 0,
   maxZoom: 17,
   maxPitch: IS_3D ? 75 : 0,
@@ -332,7 +332,7 @@ function cinematicFlyTo(opts) {
   map.flyTo({
     center: opts.center,
     zoom: targetZoom,
-    pitch: isFacilityDive ? 65 : 62,
+    pitch: isFacilityDive ? 65 : 40,
     bearing,
     duration: isFacilityDive ? 2400 : 4500,
     curve: isFacilityDive ? 1.5 : 2.5,
@@ -938,7 +938,7 @@ function finishSpotlight() {
     map.easeTo({
       center: v.center,
       zoom: Math.max(v.zoom - 1.0, 3.5),
-      pitch: 62,
+      pitch: 40,
       bearing: 0,
       duration: SPOTLIGHT_OUTRO_SETTLE_MS,
     });
@@ -1015,7 +1015,7 @@ function applyMode(want3D) {
     map.easeTo({
       center: v.center,
       zoom: Math.max(v.zoom - 1.5, 3.5),
-      pitch: 62,
+      pitch: 40,
       bearing: 0,
       duration: 1500,
     });
