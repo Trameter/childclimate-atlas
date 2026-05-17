@@ -7,7 +7,8 @@
    Branched on IS_3D below — every other code path is shared. Map init,
    camera animation, and a couple of perf tweaks are the only deltas. */
 
-const IS_3D = window.location.pathname.startsWith("/3d");
+// Mutable because the 2D ↔ 3D toggle flips it in-place (no page reload).
+let IS_3D = window.location.pathname.startsWith("/3d");
 
 const VIEWS = {
   NGA: { center: [8.7, 9.1], zoom: 5.8 },     // full Nigeria
@@ -256,22 +257,19 @@ const _baseStyle = {
   },
   layers: [{ id: "carto", type: "raster", source: "carto" }],
 };
-if (IS_3D) {
-  _baseStyle.projection = { type: "globe" };
-  // Sky layer renders the atmospheric glow around the globe limb. Works
-  // best with the dark basemap — the cool-blue atmosphere reads as space
-  // against the dark ground tiles.
-  _baseStyle.layers.unshift({
-    id: "sky",
-    type: "sky",
-    paint: {
-      "sky-type": "atmosphere",
-      "sky-atmosphere-color": "#1A2540",
-      "sky-atmosphere-halo-color": "#5B8DB8",
-      "sky-atmosphere-sun-intensity": 8,
-    },
-  });
-}
+// MapLibre v5 sky/atmosphere at the top level of the style. Atmosphere
+// only renders when the projection is globe; in mercator it's a no-op.
+// We include it unconditionally so toggling to globe via setProjection()
+// later doesn't require re-loading the style.
+_baseStyle.sky = {
+  "atmosphere-blend": [
+    "interpolate", ["linear"], ["zoom"],
+    0, 1,    // full atmosphere at “space” zoom
+    5, 0.7,  // mostly faded by country-level zoom
+    8, 0,    // gone by city-level
+  ],
+};
+_baseStyle.projection = { type: IS_3D ? "globe" : "mercator" };
 const map = new maplibregl.Map({
   container: "map",
   style: _baseStyle,
@@ -309,6 +307,83 @@ function cinematicFlyTo(opts) {
     curve: 1.5,
     speed: 0.7,
     essential: true,
+  });
+}
+
+// ---- 2D ↔ 3D in-place swap (no page reload) ----
+//
+// Flips the map between mercator + flat (2D) and globe + tilted (3D).
+// Preserves: data, filters, selected facility, scroll position. Updates:
+// projection, pitch/bearing, body class, toggle .active, URL via
+// History API. Listeners for back/forward (popstate) below.
+//
+// The two HTML files (/index.html, /3d/index.html) still exist for
+// distinct OG share cards on first paint — first load picks the right
+// initial state from the pathname, and the toggle from then on never
+// reloads the page.
+function applyMode(want3D) {
+  if (want3D === IS_3D) return;
+  IS_3D = want3D;
+
+  // 1. Projection switch — instantaneous, no animation parameter.
+  //    Raster tiles in MapLibre v5 reproject correctly across both modes.
+  map.setProjection({ type: want3D ? "globe" : "mercator" });
+
+  // 2. Camera ease into the new mode — same duration as a flyTo so the
+  //    transition feels intentional rather than abrupt.
+  if (want3D) {
+    // Pull back slightly so the curvature is visible; tilt to pitch 55.
+    const currentZoom = map.getZoom();
+    map.easeTo({
+      pitch: 55,
+      zoom: Math.min(currentZoom, 4.2),
+      bearing: 0,
+      duration: 1200,
+    });
+  } else {
+    // Flatten back. Pull camera to the current country's default framing.
+    const iso = currentData?.metadata?.iso3 || "NGA";
+    const v = VIEWS[iso] || VIEWS.NGA;
+    map.easeTo({
+      pitch: 0,
+      bearing: 0,
+      zoom: v.zoom,
+      center: v.center,
+      duration: 1200,
+    });
+  }
+
+  // 3. Reflect mode in the DOM (body class for any CSS that depends on it,
+  //    .vt-btn.active flip on the toggle).
+  document.body.classList.toggle("is-3d", want3D);
+  document.querySelectorAll(".view-toggle .vt-btn").forEach(btn => {
+    const href = btn.getAttribute("href");
+    btn.classList.toggle("active", href === (want3D ? "/3d" : "/"));
+  });
+}
+
+// Intercept toggle clicks: prevent the native navigation, swap in place,
+// push the URL via History API so back/forward + share-link work as if
+// the page had actually navigated.
+function wireViewToggle() {
+  document.querySelectorAll(".view-toggle .vt-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      // Allow modifier-key opens (cmd+click etc.) to behave normally.
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+      const href = btn.getAttribute("href");
+      const want3D = href === "/3d";
+      if (want3D === IS_3D) { e.preventDefault(); return; }
+      e.preventDefault();
+      applyMode(want3D);
+      // pushState reflects the navigation in the URL bar without reloading.
+      history.pushState({ mode: want3D ? "3d" : "2d" }, "", want3D ? "/3d" : "/");
+    });
+  });
+
+  // Back/forward should swap modes the same way.
+  window.addEventListener("popstate", () => {
+    const want3D = window.location.pathname.startsWith("/3d");
+    if (want3D !== IS_3D) applyMode(want3D);
   });
 }
 
@@ -1252,6 +1327,7 @@ async function switchCountry(iso3) {
 
 // ---- event wiring ----
 document.addEventListener("DOMContentLoaded", () => {
+  wireViewToggle();
   document.getElementById("country").addEventListener("change", e => switchCountry(e.target.value));
   // State dropdown toggle
   document.getElementById("state-btn").addEventListener("click", (e) => {
