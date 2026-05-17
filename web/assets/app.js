@@ -1976,13 +1976,29 @@ function openFacilityFromUrl() {
   // Search allFeatures (not just filtered) — the URL is authoritative,
   // filter chip state shouldn't hide a directly-linked facility.
   const f = allFeatures.find(ff => ff.properties.id === wantedId);
-  if (!f) return false;
-  // Small delay so the data + map are settled before the cinematic fly.
-  setTimeout(() => {
-    cinematicFlyTo({ center: f.geometry.coordinates, zoom: 13 });
-    highlightFacility(f);
-    renderDetail(f);
-  }, 300);
+  if (!f) {
+    // Helpful when an old shared URL points at a facility that fell out
+    // of the dataset after a pipeline rebuild (different dedup, etc.).
+    console.warn("[atlas] URL ?facility=" + wantedId + " not found in current data");
+    return false;
+  }
+  // Open the detail panel + set the selection ring IMMEDIATELY — these
+  // don't depend on the camera being settled. The cinematicFlyTo runs
+  // concurrently. Doing highlight + render up front (rather than inside
+  // a setTimeout) means the ring is set on the source even while the
+  // camera is still arriving, instead of waiting an extra 300ms and
+  // racing the user's first interaction.
+  highlightFacility(f);
+  renderDetail(f);
+  cinematicFlyTo({ center: f.geometry.coordinates, zoom: 13 });
+  // Belt-and-braces: re-apply the highlight once the map settles, in
+  // case the source's first setData missed a render frame during the
+  // flyTo (very narrow race seen in the deferred-data-apply path).
+  map.once("idle", () => {
+    if (document.body.classList.contains("has-detail")) {
+      highlightFacility(f);
+    }
+  });
   return true;
 }
 
