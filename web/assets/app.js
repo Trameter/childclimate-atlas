@@ -390,6 +390,72 @@ let dataReady = false;       // flips true once the active country's GeoJSON
                              // don't trigger a no-op run over an empty map.
 let pendingSpotlightStart = false; // a Spotlight click that arrived before
                              // dataReady; auto-fires when data is ready.
+let _prevCountryCenter = null;     // [lng, lat] of the previously-loaded
+                             // country, used to draw the great-circle arc
+                             // on the next country switch.
+let _countryTrailTimer = null;     // setTimeout handle for clearing the trail.
+
+// ---- Great-circle path helpers (country-trail arc on switchCountry) ----
+//
+// Given two [lng, lat] points on the globe, return N points along the
+// great-circle (shortest path on a sphere) between them. We draw this as a
+// LineString in MapLibre; when the map projection is globe, the line
+// renders ON the sphere surface and follows the curvature naturally —
+// it appears as a glowing arc sweeping from one country to the other.
+function greatCirclePath(start, end, steps = 64) {
+  const [lng1, lat1] = start;
+  const [lng2, lat2] = end;
+  const phi1 = lat1 * Math.PI / 180;
+  const phi2 = lat2 * Math.PI / 180;
+  const lambda1 = lng1 * Math.PI / 180;
+  const lambda2 = lng2 * Math.PI / 180;
+
+  const d = Math.acos(
+    Math.max(-1, Math.min(1,
+      Math.sin(phi1) * Math.sin(phi2) +
+      Math.cos(phi1) * Math.cos(phi2) * Math.cos(lambda2 - lambda1)
+    ))
+  );
+  // Degenerate case: same point.
+  if (d < 1e-9) return [start, end];
+
+  const points = [];
+  for (let i = 0; i <= steps; i++) {
+    const f = i / steps;
+    const A = Math.sin((1 - f) * d) / Math.sin(d);
+    const B = Math.sin(f * d) / Math.sin(d);
+    const x = A * Math.cos(phi1) * Math.cos(lambda1) + B * Math.cos(phi2) * Math.cos(lambda2);
+    const y = A * Math.cos(phi1) * Math.sin(lambda1) + B * Math.cos(phi2) * Math.sin(lambda2);
+    const z = A * Math.sin(phi1) + B * Math.sin(phi2);
+    const phi = Math.atan2(z, Math.sqrt(x * x + y * y));
+    const lambda = Math.atan2(y, x);
+    points.push([lambda * 180 / Math.PI, phi * 180 / Math.PI]);
+  }
+  return points;
+}
+
+// Draw the arc as a glowing LineString from `from` to `to` on the globe;
+// clear it after `holdMs` so it doesn't linger past the user's awareness
+// of the camera arriving. Only meaningful in 3D — in 2D the arc would be
+// a flat line across a flat map, which doesn't read as a journey.
+function showCountryTrail(from, to, holdMs = 6500) {
+  if (!IS_3D) return;
+  const src = map.getSource("country-trail");
+  if (!src) return;
+  src.setData({
+    type: "FeatureCollection",
+    features: [{
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: greatCirclePath(from, to) },
+      properties: {},
+    }],
+  });
+  if (_countryTrailTimer !== null) clearTimeout(_countryTrailTimer);
+  _countryTrailTimer = setTimeout(() => {
+    map.getSource("country-trail")?.setData({ type: "FeatureCollection", features: [] });
+    _countryTrailTimer = null;
+  }, holdMs);
+}
 
 // ---- Loading overlay (centered "Loading the globe…" badge on the map) ----
 function showMapLoading() {
@@ -1280,6 +1346,37 @@ function updateMap() {
     },
   });
 
+  // Country-trail — a glowing great-circle line on the globe drawn between
+  // the previous country's center and the new country's center whenever
+  // the user switches countries in 3D. Renders as a wide blurred ember
+  // glow underneath a thinner brighter line, same two-layer pattern as
+  // facilities-glow + facilities. Source stays empty until showCountryTrail
+  // populates it; cleared after the camera arrives.
+  map.addSource("country-trail", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({
+    id: "country-trail-glow",
+    type: "line",
+    source: "country-trail",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: {
+      "line-color": "#D87B4F",  // var(--ember)
+      "line-width": 10,
+      "line-blur": 6,
+      "line-opacity": 0.45,
+    },
+  });
+  map.addLayer({
+    id: "country-trail-line",
+    type: "line",
+    source: "country-trail",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: {
+      "line-color": "#FAF8F4",  // var(--paper) — bright crisp core
+      "line-width": 2,
+      "line-opacity": 0.95,
+    },
+  });
+
   map.on("click", "facilities", e => {
     if (!e.features.length) return;
     const f = e.features[0];
@@ -2002,6 +2099,17 @@ async function switchCountry(iso3) {
   // Start the map fly animation immediately. In 3D, ease out to a slightly
   // wider pitched view so country switching feels like swinging across the
   // globe rather than warping to a new flat patch.
+  //
+  // ALSO in 3D: draw a glowing great-circle arc on the globe surface from
+  // the previous country's center to this one. Lights up while the camera
+  // is in flight, fades after arrival. Skip if there's no previous center
+  // (initial load) or if previous == current (same country reselect).
+  if (IS_3D && _prevCountryCenter
+      && (_prevCountryCenter[0] !== v.center[0] || _prevCountryCenter[1] !== v.center[1])) {
+    showCountryTrail(_prevCountryCenter, v.center);
+  }
+  _prevCountryCenter = v.center;
+
   cinematicFlyTo({
     center: v.center,
     zoom: IS_3D ? Math.max(v.zoom - 1.5, 3) : v.zoom,
