@@ -1909,7 +1909,7 @@ function renderDetail(feature) {
 
     <div class="detail-section">
       <h4>Recommended actions · ranked</h4>
-      <p class="section-note">Ordered to mirror the drivers above. Some drivers (like child-population density) appear above only to explain the score — there's no facility-level fix for them, so they don't produce a recommendation here.</p>
+      <p class="section-note">Only drivers with a facility-level fix produce a recommendation.</p>
       ${recHtml}
     </div>
   `;
