@@ -261,12 +261,19 @@ const _baseStyle = {
 // only renders when the projection is globe; in mercator it's a no-op.
 // We include it unconditionally so toggling to globe via setProjection()
 // later doesn't require re-loading the style.
+//
+// Intensity tuned DOWN from the MapLibre default because at high pitch
+// (camera tilted up toward the horizon) the default atmosphere renders
+// as a bright white-ish wash at the top of the map area, which reads as
+// a glaring strip during cinematic camera moves. Quarter-intensity at
+// space zoom + faster fade-out keeps the subtle horizon glow that sells
+// the curvature without the distracting brightness.
 _baseStyle.sky = {
   "atmosphere-blend": [
     "interpolate", ["linear"], ["zoom"],
-    0, 1,    // full atmosphere at “space” zoom
-    5, 0.7,  // mostly faded by country-level zoom
-    8, 0,    // gone by city-level
+    0, 0.35,  // gentle haze at space zoom (was 1.0 — too bright)
+    4, 0.2,   // dimmer at country zoom
+    7, 0,     // gone by sub-country zoom
   ],
 };
 _baseStyle.projection = { type: IS_3D ? "globe" : "mercator" };
