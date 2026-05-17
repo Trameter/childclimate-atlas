@@ -310,6 +310,103 @@ function cinematicFlyTo(opts) {
   });
 }
 
+// ---- 3D-only floating UI: first-visit hint + take-the-tour button ----
+//
+// Both elements live in the HTML of both pages (so the toggle can show
+// them in-place without touching the DOM tree). Visibility for the tour
+// button is pure CSS (body.is-3d .map-tour-btn { display: inline-flex }).
+// The hint additionally needs the .show class — we only add it when
+// IS_3D AND the user hasn't dismissed it before.
+//
+// Tour: a manual requestAnimationFrame bearing sweep, not map.easeTo,
+// because easeTo over 360° of bearing change can flicker through the
+// 0/-360 boundary on some MapLibre versions. The rAF loop is precise
+// and trivially cancellable via the tourActive flag.
+const HINT_DISMISSED_KEY = "atlas-3d-hint-dismissed";
+const HINT_AUTO_DISMISS_MS = 12000;
+const TOUR_INTRO_MS = 1500;       // ease into the wide tilted framing
+const TOUR_ROTATE_MS = 25000;     // one full 360° rotation
+let tourActive = false;
+let hintAutoDismissId = null;
+
+function showHint() {
+  if (!IS_3D) return;
+  if (localStorage.getItem(HINT_DISMISSED_KEY) === "1") return;
+  const hint = document.getElementById("map-hint");
+  if (!hint) return;
+  hint.classList.add("show");
+  if (hintAutoDismissId !== null) clearTimeout(hintAutoDismissId);
+  hintAutoDismissId = setTimeout(() => dismissHint(true), HINT_AUTO_DISMISS_MS);
+}
+
+function dismissHint(persist) {
+  const hint = document.getElementById("map-hint");
+  if (hint) hint.classList.remove("show");
+  if (hintAutoDismissId !== null) {
+    clearTimeout(hintAutoDismissId);
+    hintAutoDismissId = null;
+  }
+  if (persist) {
+    try { localStorage.setItem(HINT_DISMISSED_KEY, "1"); } catch {}
+  }
+}
+
+function setTourButtonState(active) {
+  const btn = document.getElementById("btn-tour");
+  if (!btn) return;
+  btn.classList.toggle("active", active);
+  const icon = btn.querySelector(".tour-icon");
+  const label = btn.querySelector(".tour-label");
+  if (icon) icon.textContent = active ? "■" : "▶";
+  if (label) label.textContent = active ? "Stop tour" : "Take the tour";
+}
+
+function startTour() {
+  if (!IS_3D || tourActive) return;
+  tourActive = true;
+  setTourButtonState(true);
+
+  const iso = currentData?.metadata?.iso3 || "NGA";
+  const v = VIEWS[iso] || VIEWS.NGA;
+  const startBearing = map.getBearing();
+
+  // Phase 1 — ease into the wide, tilted touring framing.
+  map.easeTo({
+    center: v.center,
+    zoom: Math.max(v.zoom - 1.0, 3.5),
+    pitch: 60,
+    bearing: startBearing,
+    duration: TOUR_INTRO_MS,
+  });
+
+  // Phase 2 — manual bearing rotation via rAF, started after the intro ease.
+  setTimeout(() => {
+    if (!tourActive) return;
+    let t0 = null;
+    function rotate(now) {
+      if (!tourActive) return;
+      if (t0 === null) t0 = now;
+      const elapsed = now - t0;
+      if (elapsed >= TOUR_ROTATE_MS) {
+        stopTour();
+        return;
+      }
+      const sweep = (elapsed / TOUR_ROTATE_MS) * 360;
+      map.setBearing(startBearing - sweep);
+      requestAnimationFrame(rotate);
+    }
+    requestAnimationFrame(rotate);
+  }, TOUR_INTRO_MS);
+}
+
+function stopTour() {
+  if (!tourActive) return;
+  tourActive = false;
+  setTourButtonState(false);
+  // Halt any in-flight easeTo so the camera stays where the rotation left it.
+  map.stop();
+}
+
 // ---- 2D ↔ 3D in-place swap (no page reload) ----
 //
 // Flips the map between mercator + flat (2D) and globe + tilted (3D).
@@ -366,6 +463,15 @@ function applyMode(want3D) {
   //    is ready, so on early toggles it does nothing.
   if (want3D) setupPulseLayer();
   else teardownPulseLayer();
+
+  // 5. 3D-only floating UI: show the first-visit hint (if not dismissed)
+  //    on entry; stop the tour + clear any visible hint on exit.
+  if (want3D) {
+    showHint();
+  } else {
+    dismissHint(false);
+    if (tourActive) stopTour();
+  }
 }
 
 // ---- 3D pulse animation on the most-critical facilities ----
@@ -1403,6 +1509,39 @@ async function switchCountry(iso3) {
 // ---- event wiring ----
 document.addEventListener("DOMContentLoaded", () => {
   wireViewToggle();
+
+  // 3D floating-UI wiring. Buttons live in the HTML of both pages so the
+  // in-place toggle reaches them; we just wire their handlers once here.
+  const hintClose = document.getElementById("hint-close");
+  if (hintClose) hintClose.addEventListener("click", () => dismissHint(true));
+
+  const tourBtn = document.getElementById("btn-tour");
+  if (tourBtn) tourBtn.addEventListener("click", () => {
+    if (tourActive) stopTour();
+    else startTour();
+  });
+
+  // User interaction with the map cancels both the hint and the tour — the
+  // hint because the user has clearly figured out the controls, the tour
+  // because they want manual control. These events fire only for genuine
+  // user-initiated input, not for our own easeTo/flyTo calls.
+  map.on("dragstart", () => {
+    if (tourActive) stopTour();
+    dismissHint(true);
+  });
+  map.on("wheel", () => {
+    if (tourActive) stopTour();
+    dismissHint(true);
+  });
+  map.on("touchstart", () => {
+    if (tourActive) stopTour();
+    dismissHint(true);
+  });
+
+  // Initial-load hint: if /3d/ was the landing page, show the hint after
+  // a short delay so it doesn't fight with the data-loading state.
+  if (IS_3D) setTimeout(showHint, 800);
+
   document.getElementById("country").addEventListener("change", e => switchCountry(e.target.value));
   // State dropdown toggle
   document.getElementById("state-btn").addEventListener("click", (e) => {

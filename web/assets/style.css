@@ -612,6 +612,112 @@ body:not(.has-detail) .side-r { border-left-color: transparent; }
 }
 
 /* =========================================================================
+   3D-only floating UI (hint chip + take-the-tour CTA)
+   Visibility gated on body.is-3d — the 2D ↔ 3D toggle's applyMode() flips
+   the class so these appear/disappear in-place without any JS show/hide.
+   ========================================================================= */
+.map-hint {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-12px);
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px 8px 14px;
+  background: rgba(30, 36, 51, 0.94);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  color: var(--paper);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  z-index: 20;
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.32s ease-out, opacity 0.32s ease-out;
+}
+body.is-3d .map-hint { display: inline-flex; }
+body.is-3d .map-hint.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+.map-hint .hint-icon {
+  color: var(--ember);
+  font-size: 14px;
+  line-height: 1;
+  display: inline-block;
+  animation: hint-spin 4s linear infinite;
+}
+@keyframes hint-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.map-hint .hint-close {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px;
+  background: transparent;
+  border: none;
+  color: var(--paper-mute);
+  cursor: pointer;
+  font-size: 16px;
+  border-radius: 50%;
+  font-family: inherit;
+  padding: 0;
+  margin-left: 2px;
+}
+.map-hint .hint-close:hover { color: var(--paper); background: rgba(255,255,255,0.06); }
+
+.map-tour-btn {
+  position: absolute;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 22px;
+  background: var(--ember);
+  border: none;
+  border-radius: 999px;
+  color: var(--ink);
+  font-family: "Inter Tight", Inter, system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: 0 8px 28px rgba(216, 123, 79, 0.4), 0 0 0 1px rgba(216, 123, 79, 0.55);
+  transition: transform 0.18s ease-out, box-shadow 0.18s ease-out, background 0.18s ease-out;
+  z-index: 20;
+}
+body.is-3d .map-tour-btn { display: inline-flex; }
+.map-tour-btn:hover {
+  transform: translateX(-50%) translateY(-2px);
+  box-shadow: 0 12px 32px rgba(216, 123, 79, 0.5), 0 0 0 1px rgba(216, 123, 79, 0.75);
+}
+.map-tour-btn .tour-icon { font-size: 10px; line-height: 1; }
+.map-tour-btn.active {
+  background: var(--ink-2);
+  color: var(--paper);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.5), 0 0 0 1px var(--ember);
+}
+.map-tour-btn.active:hover {
+  background: var(--ink-3);
+}
+
+@media (max-width: 820px) {
+  .map-tour-btn { padding: 9px 16px; font-size: 12px; bottom: 16px; }
+  .map-hint { padding: 6px 10px; font-size: 10px; top: 10px; gap: 8px; }
+  .map-hint .hint-text {
+    max-width: 180px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+}
+
+/* =========================================================================
    MAP (center)
    ========================================================================= */
 .map-wrap {
