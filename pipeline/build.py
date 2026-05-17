@@ -78,7 +78,7 @@ def _to_geojson(scored: List[Dict], country: CountryConfig) -> Dict:
     }
 
 
-def build(iso3: str, limit: int | None = None, fresh: bool = False, full: bool = False) -> Dict:
+def build(iso3: str, limit: int | None = None, fresh: bool = False, full: bool = False, stride_override: int | None = None) -> Dict:
     config = load_country(iso3)
     if full:
         _log(f"Building FULL COUNTRY atlas for {config.name} ({config.iso3})")
@@ -130,18 +130,23 @@ def build(iso3: str, limit: int | None = None, fresh: bool = False, full: bool =
     # nearest-neighbor fill from a sparser grid is still accurate. The
     # per-point cache makes re-runs cheap regardless of stride.
     n = len(all_facilities)
-    if n > 20000:
-        stride = 100    # ~500 samples for a 50k-facility country rebuild
-    elif n > 5000:
-        stride = 25
-    elif n > 2000:
-        stride = 20
-    elif n > 500:
-        stride = 10
+    if stride_override is not None and stride_override > 0:
+        stride = stride_override
+        _log(f"  using OVERRIDE sample stride {stride} for {n} facilities "
+             f"(~{n // stride} climate + {n // stride} air samples)")
     else:
-        stride = 5
-    _log(f"  using sample stride {stride} for {n} facilities "
-         f"(~{n // stride} climate + {n // stride} air samples)")
+        if n > 20000:
+            stride = 100    # ~500 samples for a 50k-facility country rebuild
+        elif n > 5000:
+            stride = 25
+        elif n > 2000:
+            stride = 20
+        elif n > 500:
+            stride = 10
+        else:
+            stride = 5
+        _log(f"  using sample stride {stride} for {n} facilities "
+             f"(~{n // stride} climate + {n // stride} air samples)")
 
     _log("Fetching climate indicators via Open-Meteo...")
     climate_by_id = climate_src.fetch_for_facilities(all_facilities, sample_stride=stride)
@@ -205,9 +210,13 @@ def main():
     ap.add_argument("--limit", type=int, default=None, help="Cap facilities for quick runs")
     ap.add_argument("--fresh", action="store_true", help="Bypass facility cache")
     ap.add_argument("--full", action="store_true", help="Use full country bbox instead of focus region")
+    ap.add_argument("--stride", type=int, default=None,
+                    help="Override the auto-computed climate/AQ sample stride. "
+                         "Lower = denser grid = more accurate but slower (more API fetches). "
+                         "For NGA: default 100, finer 50 populates the SEVERE band properly.")
     args = ap.parse_args()
     try:
-        build(args.country, limit=args.limit, fresh=args.fresh, full=args.full)
+        build(args.country, limit=args.limit, fresh=args.fresh, full=args.full, stride_override=args.stride)
     except KeyboardInterrupt:
         sys.exit(130)
 
