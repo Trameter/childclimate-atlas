@@ -1054,7 +1054,12 @@ body.has-detail #detail.detail {
 .microscene {
   position: relative;
   margin: 18px 22px 4px;
-  height: 160px;
+  /* Visible container is half-height — the lower half of the original
+     scene was mostly ground plane with little motion, so we clip it and
+     keep only the top half where the active particles live. The canvas
+     itself stays at the full 160px internally so the scene composition,
+     camera framing, and animation are unchanged. */
+  height: 80px;
   border: 1px solid var(--rule);
   border-radius: 4px;
   overflow: hidden;
@@ -1068,8 +1073,13 @@ body.has-detail #detail.detail {
 .microscene.ready { opacity: 1; }
 .microscene-canvas {
   display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
-  height: 100%;
+  /* Render at full original height; the container's overflow:hidden clips
+     the dead lower half. Pinned to top so the active region stays visible. */
+  height: 160px;
 }
 .microscene-label {
   position: absolute;
