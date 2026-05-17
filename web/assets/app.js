@@ -358,14 +358,14 @@ const SPOTLIGHT_CONTRAST_LOW_N = 1;
 const SPOTLIGHT_INTRO_MS = 10000;        // opening globe spin — “scanning” beat
 const SPOTLIGHT_INTRO_BEARING = 70;      // degree magnitude (subtracted at use
                                          // site = clockwise = right-spinning)
-const SPOTLIGHT_FLY_MS = 5000;           // NEAR arc duration — dives have weight
-const SPOTLIGHT_FLY_MS_FAR = 9500;       // FAR arc duration — enough time for the
+const SPOTLIGHT_FLY_MS = 6500;           // NEAR arc duration — dives have weight
+const SPOTLIGHT_FLY_MS_FAR = 11000;      // FAR arc duration — enough time for the
                                          // camera to climb out to globe view
                                          // and dive back down, not snap
 const SPOTLIGHT_FLY_CURVE = 2.5;         // near-arc curve
 const SPOTLIGHT_FLY_CURVE_FAR = 4.5;     // far-arc curve — dramatic pullback
-const SPOTLIGHT_FLY_SPEED_NEAR = 0.4;    // lower = slower apparent motion
-const SPOTLIGHT_FLY_SPEED_FAR = 0.3;     // lower still for far arcs
+const SPOTLIGHT_FLY_SPEED_NEAR = 0.32;   // lower = slower apparent motion
+const SPOTLIGHT_FLY_SPEED_FAR = 0.25;    // lower still for far arcs
 const SPOTLIGHT_FAR_THRESHOLD_DEG = 2.0; // degree distance threshold for
                                          // far-vs-near pacing branch
 const SPOTLIGHT_FLY_BEARING_SPREAD = 60; // bearing jitter per arc, in degrees
@@ -383,6 +383,13 @@ let spotlightIdx = 0;        // index of the NEXT stop to visit (resume token)
 let spotlightTimer = null;   // setTimeout handle for the schedule chain
 let spotlightPopup = null;   // active maplibregl.Popup instance
 let spotlightIsFreshRun = true; // false when resuming mid-reel after stop
+let dataReady = false;       // flips true once the active country's GeoJSON
+                             // has been fetched, parsed, filtered, and the
+                             // map source has been populated. Spotlight
+                             // gates on this so clicks during data load
+                             // don't trigger a no-op run over an empty map.
+let pendingSpotlightStart = false; // a Spotlight click that arrived before
+                             // dataReady; auto-fires when data is ready.
 
 function buildSpotlightQueue() {
   // Pull from the CURRENT filtered set so the spotlight always reflects
@@ -440,6 +447,18 @@ function setTourButtonState() {
 
 function startSpotlight() {
   if (!IS_3D || tourActive) return;
+
+  // If the user clicks Spotlight before the data has finished loading, queue
+  // the request and auto-fire it once data is ready. Otherwise the click
+  // silently does nothing (buildSpotlightQueue returns [] for empty
+  // filteredFeatures), which felt like the button was broken. The deferred
+  // start also gives a beat for the freshly-rendered dots to appear before
+  // the camera starts arcing through them.
+  if (!dataReady) {
+    pendingSpotlightStart = true;
+    return;
+  }
+
   // Rebuild the queue if it's empty (first run, or after a country/filter
   // change). Keep the existing queue if we're resuming — spotlightIdx points
   // at the next unvisited stop and we want to continue from there. The
@@ -527,15 +546,15 @@ function playSpotlightIntro() {
     bearing: startBearing - SPOTLIGHT_INTRO_BEARING,
     duration: SPOTLIGHT_INTRO_MS,
   });
-  // Chain the first dive via moveend (fires the instant the easeTo settles)
-  // instead of a setTimeout buffer that left a perceptible pause between
-  // the intro completing and the dive starting. once() means it only hooks
-  // the next fire, so subsequent moveend events from facility flights don't
-  // re-trigger this handler.
-  map.once("moveend", () => {
+  // Start the first dive 250ms BEFORE the intro easeTo completes. flyTo
+  // cleanly interrupts an in-flight easeTo without any settling pause,
+  // which is what map.once("moveend") + visitNext gave us: a perceptible
+  // beat where the camera sat still between the intro ending and the
+  // first arc beginning. Overlapping eliminates that gap.
+  spotlightTimer = setTimeout(() => {
     if (!tourActive || spotlightPaused) return;
     visitNextSpotlightStop();
-  });
+  }, SPOTLIGHT_INTRO_MS - 250);
 }
 
 function visitNextSpotlightStop() {
@@ -1136,15 +1155,21 @@ function updateMap() {
   const geojson = { type: "FeatureCollection", features: filteredFeatures };
 
   // Style can briefly become "not loaded" during flyTo animations or country
-  // switches. If so, self-schedule a retry on the next idle event. We guard
-  // with `mapUpdateQueued` so rapid updates don't stack multiple listeners.
+  // switches. Self-schedule a retry, but DON'T rely solely on map.once("idle")
+  // — if a spotlight is animating non-stop, idle never fires and the update
+  // is locked out forever. Belt-and-braces: also schedule a setTimeout
+  // fallback. Whichever fires first wins; the mapUpdateQueued flag prevents
+  // the loser from double-running.
   if (!map.isStyleLoaded()) {
     if (!mapUpdateQueued) {
       mapUpdateQueued = true;
-      map.once("idle", () => {
+      const retry = () => {
+        if (!mapUpdateQueued) return; // other path already fired
         mapUpdateQueued = false;
         updateMap();
-      });
+      };
+      map.once("idle", retry);
+      setTimeout(retry, 600);
     }
     return;
   }
@@ -1769,6 +1794,10 @@ async function switchCountry(iso3) {
   // country switch is the more recent intent and a resumed spotlight would
   // otherwise fly to facilities from the previous country.
   invalidateSpotlightQueue();
+  // Reset data-ready flag for the new country; any pending click waits
+  // for the new country's data instead of firing against a stale queue.
+  dataReady = false;
+  pendingSpotlightStart = false;
 
   // --- 1. SYNCHRONOUS UI RESET (runs immediately, no await) --------------
   // Update every piece of text that references the country name NOW so the
@@ -1824,6 +1853,16 @@ async function switchCountry(iso3) {
   populateStates(allFeatures);
   updateSearchPlaceholder();
   applyFilters();
+
+  // Data + map source are now populated. Flip the ready flag and, if a
+  // pre-load Spotlight click is pending, fire it now (with a brief grace
+  // period so the freshly-rendered dots have a beat to appear before the
+  // intro spin starts arcing across them).
+  dataReady = true;
+  if (pendingSpotlightStart) {
+    pendingSpotlightStart = false;
+    setTimeout(() => startSpotlight(), 500);
+  }
 
   // --- 4. BACKGROUND PREFETCH (first load only) --------------------------
   // Warm the cache so switching to the other two countries is instant.
