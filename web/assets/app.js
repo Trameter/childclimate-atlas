@@ -2402,27 +2402,16 @@ async function switchCountry(iso3) {
   // --- 2. ASYNC DATA FETCH (with streaming progress) ---------------------
   // Kick the fetch off in parallel with the flyTo so by the time the
   // camera arrives the data is usually already sitting in memory.
-  const dataPromise = loadAtlas(iso3, { showProgress: true });
-
-  // If we're animating a trail, hold the heavy applyFilters + setData work
-  // until BOTH the data has landed AND the camera animation has finished
-  // (moveend). The setData call re-tiles ~50K features and blocks the main
-  // thread for 200-400ms; landing that mid-flight froze the trail's per-
-  // frame head update — visible as the line "getting cut off" before it
-  // reached the destination. Initial load and same-country reselect skip
-  // the wait so dots paint as fast as possible.
-  let data;
-  if (willAnimateTrail) {
-    const moveEndPromise = new Promise(resolve => {
-      // Safety net: if moveend never fires (camera was already at the
-      // destination, etc.), don't hang the country switch.
-      const t = setTimeout(resolve, 6000);
-      map.once("moveend", () => { clearTimeout(t); resolve(); });
-    });
-    [data] = await Promise.all([dataPromise, moveEndPromise]);
-  } else {
-    data = await dataPromise;
-  }
+  //
+  // We apply data AS SOON AS IT LANDS, not after the camera settles. The
+  // previous deferred-apply path waited for moveend to keep the trail's
+  // per-frame head update from stalling mid-flight — but in practice that
+  // made dots feel slow to appear after a country switch, especially when
+  // jumping from NGA (large dataset still in memory) to BGD (small + fast
+  // to fetch from cache). User feedback: dot-appearance speed > trail
+  // smoothness. The trail may stutter briefly during the 200-400ms setData
+  // when both render at the same instant, but that beats waiting.
+  const data = await loadAtlas(iso3, { showProgress: true });
   currentData = data;
   allFeatures = data.features || [];
 
