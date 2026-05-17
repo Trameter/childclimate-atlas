@@ -198,7 +198,7 @@ body:not(.has-detail) .side-r { border-left-color: transparent; }
 .scroll::-webkit-scrollbar-track { background: transparent; }
 
 .pane {
-  padding: 22px 22px 18px;
+  padding: 28px 22px 18px;
   border-bottom: 1px solid var(--rule);
 }
 .pane h3 {
