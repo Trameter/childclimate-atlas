@@ -1550,8 +1550,8 @@ function renderDetail(feature) {
       </div>
       <h2>${escapeHtml(displayName(feature))}</h2>
       <div class="loc">${stateName && stateName !== "Untagged Region" ? escapeHtml(stateName) + ", " : ""}${escapeHtml(country)}</div>
-      <a class="detail-cross-link" href="${IS_3D ? "/" : "/3d"}?country=${encodeURIComponent(currentData?.metadata?.iso3 || "NGA")}&facility=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">
-        ${IS_3D ? "Open in 2D dashboard" : "Open in 3D globe"} ↗
+      <a class="detail-cross-link" href="${IS_3D ? "/" : "/3d"}?country=${encodeURIComponent(currentData?.metadata?.iso3 || "NGA")}&facility=${encodeURIComponent(p.id)}">
+        ${IS_3D ? "View in 2D dashboard" : "View in 3D globe"} →
       </a>
 
       <div class="score-block ${b}">
