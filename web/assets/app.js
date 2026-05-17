@@ -335,19 +335,25 @@ function cinematicFlyTo(opts) {
 //                stays propulsive rather than tutorial-paced.
 const SPOTLIGHT_TOP_N = 5;
 const SPOTLIGHT_CONTRAST_LOW_N = 1;
-const SPOTLIGHT_INTRO_MS = 5000;     // opening globe spin — “scanning” beat
-const SPOTLIGHT_INTRO_BEARING = 70;  // degree magnitude (subtracted at use
-                                     // site = clockwise = right-spinning)
-const SPOTLIGHT_FLY_MS = 3200;       // travel time per NEAR arc (≤ FAR threshold)
-const SPOTLIGHT_FLY_MS_FAR = 5200;   // travel time per FAR arc, stretched so
-                                     // the camera has time to climb high and
-                                     // come back down instead of snapping
-const SPOTLIGHT_FLY_CURVE = 2.2;     // near-arc curve
-const SPOTLIGHT_FLY_CURVE_FAR = 3.2; // far-arc curve — more pronounced pullback
-const SPOTLIGHT_FAR_THRESHOLD_DEG = 2.0; // squared deg distance above which we
-                                         // treat the next stop as “far”
+// Pacing knobs. The whole reel is paced for storytelling — the user clicked
+// a button asking to be shown something, so we take the time to actually
+// show it rather than rush through.
+const SPOTLIGHT_INTRO_MS = 7000;       // opening globe spin — “scanning” beat
+const SPOTLIGHT_INTRO_BEARING = 70;    // degree magnitude (subtracted at use
+                                       // site = clockwise = right-spinning)
+const SPOTLIGHT_FLY_MS = 3200;         // NEAR arc duration (≤ FAR threshold)
+const SPOTLIGHT_FLY_MS_FAR = 7000;     // FAR arc duration — long enough for the
+                                       // camera to climb way out into space
+                                       // and dive back down, not just lerp
+const SPOTLIGHT_FLY_CURVE = 2.2;       // near-arc curve
+const SPOTLIGHT_FLY_CURVE_FAR = 4.0;   // far-arc curve — dramatic pullback
+const SPOTLIGHT_FAR_THRESHOLD_DEG = 2.0; // degree distance threshold for
+                                         // far-vs-near pacing branch
 const SPOTLIGHT_FLY_BEARING_SPREAD = 60; // bearing jitter per arc, in degrees
-const SPOTLIGHT_DWELL_MS = 3000;     // popup dwell per facility
+const SPOTLIGHT_DWELL_MS = 4000;       // popup dwell per facility (read time)
+const SPOTLIGHT_OUTRO_PULLBACK_MS = 3200;  // phase 1 of close: pull to globe + spin
+const SPOTLIGHT_OUTRO_SETTLE_MS = 3500;    // phase 2 of close: settle to country
+const SPOTLIGHT_OUTRO_BEARING = 75;        // bearing sweep during pullback
 let tourActive = false;
 let spotlightQueue = [];     // ordered array of facility features to visit
 let spotlightIdx = 0;        // index of the NEXT stop to visit (resume token)
@@ -542,32 +548,48 @@ function hideSpotlightPopup() {
 }
 
 function finishSpotlight() {
-  // End of the curated reel — arc back out to the country overview AND
-  // snap bearing to 0 so the view resets to the clean north-up framing
-  // the user landed on. Previously we kept the spotlight's residual
-  // bearing, which left the camera tilted off-axis: Nigeria appeared
-  // stretched, the atmosphere read overly warm, and labels misaligned
-  // (see Pere's screenshot comparison). The intro spin will re-introduce
-  // rotation on the next click; the finish should leave a clean slate.
+  // Two-phase cinematic close — “drone returning home”:
+  //   1. Pull WAY back to a near-space view + sweep bearing (3.2s).
+  //   2. Settle into the canonical north-up country overview (3.5s).
+  // The combined ~7s gives the reel a real finale instead of a flat zoom-out.
+  //
+  // We tear down spotlight state up front (button flips, queue resets) so
+  // a user clicking Spotlight again mid-outro starts a fresh run cleanly;
+  // their new intro spin overrides our settling easeTo, which is fine.
+  // Passing haltCamera=false to stopSpotlight prevents it from calling
+  // map.stop() and killing our just-issued easeTo.
   const iso = currentData?.metadata?.iso3 || "NGA";
   const v = VIEWS[iso] || VIEWS.NGA;
-  map.flyTo({
-    center: v.center,
-    zoom: Math.max(v.zoom - 1.0, 3.5),
-    pitch: 55,
-    bearing: 0,
-    duration: 2800,
-    curve: 1.8,
-    speed: 0.7,
-    essential: true,
-  });
-  stopSpotlight();
-  // Reset for next run — next click plays the intro spin again, rebuilds queue.
+  const startBearing = map.getBearing();
+  stopSpotlight(false);
   spotlightIdx = 0;
   spotlightQueue = [];
+
+  // Phase 1: pull back to space view + spin a bit. High pitch + low zoom
+  // = the camera is high above the planet, drifting.
+  map.easeTo({
+    zoom: 2.4,
+    pitch: 68,
+    bearing: startBearing + SPOTLIGHT_OUTRO_BEARING,
+    duration: SPOTLIGHT_OUTRO_PULLBACK_MS,
+  });
+
+  // Phase 2: ease down to the country overview at canonical bearing 0.
+  // Scheduled directly with setTimeout (NOT spotlightTimer) because the
+  // spotlight state is already torn down — this animation is purely the
+  // outro and runs independently.
+  setTimeout(() => {
+    map.easeTo({
+      center: v.center,
+      zoom: Math.max(v.zoom - 1.0, 3.5),
+      pitch: 55,
+      bearing: 0,
+      duration: SPOTLIGHT_OUTRO_SETTLE_MS,
+    });
+  }, SPOTLIGHT_OUTRO_PULLBACK_MS + 100);
 }
 
-function stopSpotlight() {
+function stopSpotlight(haltCamera = true) {
   if (!tourActive) return;
   tourActive = false;
   setTourButtonState(false);
@@ -576,8 +598,10 @@ function stopSpotlight() {
     clearTimeout(spotlightTimer);
     spotlightTimer = null;
   }
-  // Halt any in-flight flyTo so the camera stops where it is.
-  map.stop();
+  // Halt any in-flight flyTo unless the caller is finishSpotlight, which
+  // is about to issue its own multi-phase camera animation and DOES want
+  // continuity rather than a hard stop.
+  if (haltCamera) map.stop();
   // INTENTIONALLY don't reset spotlightIdx / spotlightQueue — next click
   // resumes from where the user paused. invalidateSpotlightQueue() is the
   // one that wipes them, called on filter/country change.
