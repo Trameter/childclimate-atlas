@@ -626,6 +626,64 @@ body:not(.has-detail) .side-r { border-left-color: transparent; }
   color: var(--paper-mute);
 }
 
+/* Cross-mode link inside the detail panel — jumps to the same facility in
+   the other view (3D → 2D dashboard, 2D → 3D globe) in a new tab. */
+.detail-cross-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ember);
+  border: 1px solid rgba(216, 123, 79, 0.5);
+  border-radius: 999px;
+  text-decoration: none;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.detail-cross-link:hover {
+  background: rgba(216, 123, 79, 0.12);
+  border-color: var(--ember);
+  color: var(--paper);
+}
+
+/* =========================================================================
+   Map loading overlay — shown while the country GeoJSON is being fetched +
+   parsed + rendered. Hides on dataReady. Belt to the topbar chip's loading
+   text — the chip is small + corner-positioned, this is the centered visual
+   anchor. Same treatment in both 2D and 3D modes.
+   ========================================================================= */
+.map-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(16, 21, 32, 0.55);
+  z-index: 4;
+  pointer-events: none;
+  transition: opacity 0.5s ease-out;
+  color: var(--paper);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.map-loading.hidden { opacity: 0; }
+.map-loading-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--ember);
+  animation: map-loading-pulse 1.2s ease-in-out infinite;
+}
+@keyframes map-loading-pulse {
+  0%, 100% { transform: scale(1);   opacity: 1; }
+  50%      { transform: scale(1.4); opacity: 0.4; }
+}
+
 /* =========================================================================
    3D-only floating UI (Spotlight CTA + popup styling)
    Visibility gated on body.is-3d — the 2D ↔ 3D toggle's applyMode() flips

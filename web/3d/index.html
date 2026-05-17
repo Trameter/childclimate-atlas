@@ -184,6 +184,14 @@
     <main class="map-wrap">
       <div id="map"></div>
 
+      <!-- Loading overlay shown while the country GeoJSON is being
+           fetched/parsed/rendered for the first time. Hidden the moment
+           dots are on the map. Bodied in app.js as showMapLoading/hide. -->
+      <div class="map-loading" id="map-loading">
+        <span class="map-loading-dot"></span>
+        <span class="map-loading-text">Loading the globe…</span>
+      </div>
+
       <!-- Map HUD -->
       <div class="map-hud-tl">
         <div class="hud mono" id="hud-country">Nigeria · — facilities</div>

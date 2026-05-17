@@ -391,6 +391,14 @@ let dataReady = false;       // flips true once the active country's GeoJSON
 let pendingSpotlightStart = false; // a Spotlight click that arrived before
                              // dataReady; auto-fires when data is ready.
 
+// ---- Loading overlay (centered "Loading the globe…" badge on the map) ----
+function showMapLoading() {
+  document.getElementById("map-loading")?.classList.remove("hidden");
+}
+function hideMapLoading() {
+  document.getElementById("map-loading")?.classList.add("hidden");
+}
+
 function buildSpotlightQueue() {
   // Pull from the CURRENT filtered set so the spotlight always reflects
   // whatever the user is looking at (country switch, state filter, etc.).
@@ -1184,11 +1192,22 @@ function updateMap() {
     55, "#D9894F",  // high
     75, "#C35248"]; // severe
 
-  map.addSource("facilities", { type: "geojson", data: geojson });
+  // promoteId hoists properties.id to the feature's top-level id slot so
+  // MapLibre's setFeatureState() can target it for hover/selected/etc.
+  // Without this, feature-state can't be set per-dot and we can't drive
+  // paint expressions on a per-feature basis.
+  map.addSource("facilities", { type: "geojson", data: geojson, promoteId: "id" });
   map.addLayer({
     id: "facilities-glow", type: "circle", source: "facilities",
     paint: {
-      "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 6, 10, 12, 14, 18],
+      // Hover scales the glow up too, otherwise the bright halo would lag
+      // behind the enlarged dot.
+      "circle-radius": [
+        "case",
+        ["boolean", ["feature-state", "hover"], false],
+        ["interpolate", ["linear"], ["zoom"], 6, 10, 10, 18, 14, 26],
+        ["interpolate", ["linear"], ["zoom"], 6,  6, 10, 12, 14, 18],
+      ],
       "circle-color": RISK_STOPS,
       "circle-blur": 0.8, "circle-opacity": 0.32,
     },
@@ -1196,10 +1215,22 @@ function updateMap() {
   map.addLayer({
     id: "facilities", type: "circle", source: "facilities",
     paint: {
-      "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 3, 10, 6, 14, 10],
+      // Hover scale-up: 50% bigger when the feature-state hover is true.
+      // Pure GPU-side expression so it's smooth even at 50k+ dots.
+      "circle-radius": [
+        "case",
+        ["boolean", ["feature-state", "hover"], false],
+        ["interpolate", ["linear"], ["zoom"], 6, 5, 10, 9, 14, 15],
+        ["interpolate", ["linear"], ["zoom"], 6, 3, 10, 6, 14, 10],
+      ],
       "circle-color": RISK_STOPS,
       "circle-stroke-color": "rgba(30,36,51,0.85)",  // var(--ink) at 85%
-      "circle-stroke-width": 1.2,
+      "circle-stroke-width": [
+        "case",
+        ["boolean", ["feature-state", "hover"], false],
+        2.0,
+        1.2,
+      ],
     },
   });
 
@@ -1228,15 +1259,38 @@ function updateMap() {
     highlightFacility(full);
     renderDetail(full);
   });
-  map.on("mouseenter", "facilities", e => {
+  // Track which facility is currently hovered so we can clear its
+  // feature-state when the cursor moves to another dot or off the layer.
+  let hoveredFeatureId = null;
+  function clearHover() {
+    if (hoveredFeatureId !== null) {
+      map.setFeatureState({ source: "facilities", id: hoveredFeatureId }, { hover: false });
+      hoveredFeatureId = null;
+    }
+  }
+  map.on("mousemove", "facilities", e => {
     map.getCanvas().style.cursor = "pointer";
     if (!e.features.length) return;
-    const p = e.features[0].properties;
+    const f = e.features[0];
+    const id = f.id;
+    if (id === hoveredFeatureId) {
+      // Same dot; just update the popup position (it follows the cursor).
+      popup.setLngLat(e.lngLat);
+      return;
+    }
+    clearHover();
+    hoveredFeatureId = id;
+    map.setFeatureState({ source: "facilities", id }, { hover: true });
+    const p = f.properties;
     popup.setLngLat(e.lngLat)
-      .setHTML(`<b>${escapeHtml(displayName(e.features[0]))}</b><br/>${typeIcon(p.facility_type)} ${escapeHtml(p.facility_type)} &middot; <span style="color:${bandColor(p.risk_score)};font-weight:700">${p.risk_score}</span>`)
+      .setHTML(`<b>${escapeHtml(displayName(f))}</b><br/>${typeIcon(p.facility_type)} ${escapeHtml(p.facility_type)} &middot; <span style="color:${bandColor(p.risk_score)};font-weight:700">${p.risk_score}</span>`)
       .addTo(map);
   });
-  map.on("mouseleave", "facilities", () => { map.getCanvas().style.cursor = ""; popup.remove(); });
+  map.on("mouseleave", "facilities", () => {
+    map.getCanvas().style.cursor = "";
+    clearHover();
+    popup.remove();
+  });
 }
 
 // ---- sidebar: stats ----
@@ -1291,6 +1345,10 @@ function renderStats() {
 // ---- highlight selected facility ----
 function highlightFacility(feature) {
   if (!map.isStyleLoaded() || !map.getSource("selected")) return;
+  // Reflect the selection in the URL so the current view is shareable.
+  // Null/clear is handled separately by closeDetail() so we don't strip
+  // the param every time the selection is just being moved.
+  if (feature) setFacilityUrlParam(feature.properties.id);
   const geojson = {
     type: "FeatureCollection",
     features: feature ? [{
@@ -1457,6 +1515,9 @@ function renderDetail(feature) {
       </div>
       <h2>${escapeHtml(displayName(feature))}</h2>
       <div class="loc">${stateName && stateName !== "Untagged Region" ? escapeHtml(stateName) + ", " : ""}${escapeHtml(country)}</div>
+      <a class="detail-cross-link" href="${IS_3D ? "/" : "/3d"}?country=${encodeURIComponent(currentData?.metadata?.iso3 || "NGA")}&facility=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">
+        ${IS_3D ? "Open in 2D dashboard" : "Open in 3D globe"} ↗
+      </a>
 
       <div class="score-block ${b}">
         <div class="score-num">${s.toFixed(0)}</div>
@@ -1509,8 +1570,52 @@ function closeDetail() {
   document.querySelector(".detail-wrap")?.setAttribute("aria-hidden", "true");
   // Clear the selected-facility highlight ring
   highlightFacility(null);
+  // Drop the ?facility= param so a shared URL after close doesn't reopen
+  // a closed panel on reload.
+  setFacilityUrlParam(null);
   // Update map size after CSS transition
   setTimeout(() => map.resize(), 260);
+}
+
+// ---- Shareable facility URLs ----
+//
+// `/3d/?country=NGA&facility=grid3-clinic-XYZ` (or `/?country=...&facility=...`
+// for 2D) opens straight to that facility: detail panel rendered, camera
+// flown to the dot, highlight ring set. Country is explicit because IDs
+// don't always encode it. Any in-app facility selection updates the URL
+// via history.replaceState so the URL bar always reflects what's on screen
+// — share at any moment and the recipient lands on the same view.
+function setFacilityUrlParam(id) {
+  const url = new URL(window.location.href);
+  if (id) {
+    url.searchParams.set("country", currentData?.metadata?.iso3 || "NGA");
+    url.searchParams.set("facility", id);
+  } else {
+    url.searchParams.delete("facility");
+    // Keep country in URL for shareability of the country view.
+  }
+  history.replaceState(null, "", url.toString());
+}
+
+// Read ?facility= from the current URL after data is ready, find the
+// matching feature in the loaded set, and open it. Returns true if a
+// facility was successfully opened so the caller can skip default view
+// reset behavior.
+function openFacilityFromUrl() {
+  const params = new URL(window.location.href).searchParams;
+  const wantedId = params.get("facility");
+  if (!wantedId) return false;
+  // Search allFeatures (not just filtered) — the URL is authoritative,
+  // filter chip state shouldn't hide a directly-linked facility.
+  const f = allFeatures.find(ff => ff.properties.id === wantedId);
+  if (!f) return false;
+  // Small delay so the data + map are settled before the cinematic fly.
+  setTimeout(() => {
+    cinematicFlyTo({ center: f.geometry.coordinates, zoom: 13 });
+    highlightFacility(f);
+    renderDetail(f);
+  }, 300);
+  return true;
 }
 
 // ---- sidebar: top list (design: 6 rows, .crit-row grid) ----
@@ -1798,6 +1903,7 @@ async function switchCountry(iso3) {
   // for the new country's data instead of firing against a stale queue.
   dataReady = false;
   pendingSpotlightStart = false;
+  showMapLoading();
 
   // --- 1. SYNCHRONOUS UI RESET (runs immediately, no await) --------------
   // Update every piece of text that references the country name NOW so the
@@ -1854,11 +1960,14 @@ async function switchCountry(iso3) {
   updateSearchPlaceholder();
   applyFilters();
 
-  // Data + map source are now populated. Flip the ready flag and, if a
-  // pre-load Spotlight click is pending, fire it now (with a brief grace
-  // period so the freshly-rendered dots have a beat to appear before the
-  // intro spin starts arcing across them).
+  // Data + map source are now populated. Flip the ready flag, hide the
+  // loading overlay, and if a pre-load Spotlight click is pending, fire
+  // it now (with a brief grace period so the freshly-rendered dots have
+  // a beat to appear before the intro spin starts arcing across them).
   dataReady = true;
+  hideMapLoading();
+  // If the URL has ?facility=X, open it now that we know X is loadable.
+  openFacilityFromUrl();
   if (pendingSpotlightStart) {
     pendingSpotlightStart = false;
     setTimeout(() => startSpotlight(), 500);
