@@ -99,6 +99,37 @@ button { font-family: inherit; }
 
 .topbar .right { display: flex; align-items: center; gap: 12px; }
 
+/* 2D ↔ 3D view toggle in the topbar right cluster.
+   Same script powers both pages (IS_3D = pathname.startsWith('/3d')) — the
+   toggle is just two anchor tags styled as a segmented control. Active
+   state is set in HTML (.active class) since it depends on which page is
+   served, not on JavaScript state. */
+.view-toggle {
+  display: inline-flex;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 2px;
+}
+.view-toggle .vt-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 32px;
+  padding: 4px 10px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--paper-mute);
+  text-decoration: none;
+  border-radius: 3px;
+  transition: background 0.12s, color 0.12s;
+}
+.view-toggle .vt-btn:hover { color: var(--paper); }
+.view-toggle .vt-btn.active {
+  background: var(--ember);
+  color: var(--ink);
+}
+
 .chip {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 6px 12px;

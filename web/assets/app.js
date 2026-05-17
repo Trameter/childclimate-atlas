@@ -1,5 +1,13 @@
 /* ChildClimate Risk Atlas — v2 frontend
-   Full-featured: search, filters, legend, recommendations, export, charts. */
+   Full-featured: search, filters, legend, recommendations, export, charts.
+
+   The same script powers two entry points:
+     /             → 2D map (Mercator, top-down, working tool)
+     /3d           → 3D globe (atmosphere, tilted camera, cinematic flyTo)
+   Branched on IS_3D below — every other code path is shared. Map init,
+   camera animation, and a couple of perf tweaks are the only deltas. */
+
+const IS_3D = window.location.pathname.startsWith("/3d");
 
 const VIEWS = {
   NGA: { center: [8.7, 9.1], zoom: 5.8 },     // full Nigeria
@@ -167,7 +175,9 @@ async function loadAtlas(iso3, { showProgress = false } = {}) {
 
   const p = (async () => {
     try {
-      const r = await fetch(`./data/${iso3}.geojson`);
+      // Absolute path so the same module works from /3d/ (where ./ would
+      // resolve to /3d/data/X.geojson and 404).
+      const r = await fetch(`/data/${iso3}.geojson`);
       if (!r.ok) throw new Error(r.status);
 
       // If the server is sending gzipped content, the Content-Length header
@@ -226,21 +236,81 @@ function prefetchOtherCountries(currentIso3) {
 }
 
 // ---- map init ----
+// Base style is shared between 2D + 3D. The 3D path additionally:
+//   1. Wraps the world on a sphere via projection: { type: "globe" }
+//   2. Adds a `sky` layer for the soft atmospheric glow at the horizon
+//   3. Lands the user at a tilted, slightly zoomed-out camera so the
+//      curvature is immediately visible (zoom 3.5, pitch 55).
+const _baseStyle = {
+  version: 8,
+  sources: {
+    carto: {
+      type: "raster",
+      tiles: [
+        "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
+        "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
+      ],
+      tileSize: 256,
+      attribution: "© OSM © CARTO",
+    },
+  },
+  layers: [{ id: "carto", type: "raster", source: "carto" }],
+};
+if (IS_3D) {
+  _baseStyle.projection = { type: "globe" };
+  // Sky layer renders the atmospheric glow around the globe limb. Works
+  // best with the dark basemap — the cool-blue atmosphere reads as space
+  // against the dark ground tiles.
+  _baseStyle.layers.unshift({
+    id: "sky",
+    type: "sky",
+    paint: {
+      "sky-type": "atmosphere",
+      "sky-atmosphere-color": "#1A2540",
+      "sky-atmosphere-halo-color": "#5B8DB8",
+      "sky-atmosphere-sun-intensity": 8,
+    },
+  });
+}
 const map = new maplibregl.Map({
   container: "map",
-  style: {
-    version: 8,
-    sources: { carto: { type: "raster", tiles: [
-      "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-      "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-    ], tileSize: 256, attribution: "\u00a9 OSM \u00a9 CARTO" } },
-    layers: [{ id: "carto", type: "raster", source: "carto" }],
-  },
-  center: VIEWS.NGA.center,
-  zoom: VIEWS.NGA.zoom,
+  style: _baseStyle,
+  center: IS_3D ? [9.5, 5.0] : VIEWS.NGA.center,
+  zoom: IS_3D ? 3.4 : VIEWS.NGA.zoom,
+  pitch: IS_3D ? 55 : 0,
+  bearing: 0,
   maxZoom: 17,
+  maxPitch: IS_3D ? 75 : 0,
 });
-map.addControl(new maplibregl.NavigationControl(), "top-right");
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: IS_3D }), "top-right");
+
+// Cinematic camera helper. 2D path falls straight through to map.flyTo so
+// the working tool stays predictable. 3D path adds pitch + bearing so the
+// camera arcs across the globe + dives into the target facility, which is
+// the whole point of the immersive view.
+function cinematicFlyTo(opts) {
+  if (!IS_3D) {
+    map.flyTo(opts);
+    return;
+  }
+  // For deep zoom (facility focus) we want a dramatic dive: high pitch,
+  // slightly randomized bearing so consecutive clicks don't look identical.
+  const targetZoom = opts.zoom ?? map.getZoom();
+  const isFacilityDive = targetZoom >= 11;
+  const bearing = isFacilityDive
+    ? (map.getBearing() + (Math.random() * 30 - 15))
+    : 0;
+  map.flyTo({
+    center: opts.center,
+    zoom: targetZoom,
+    pitch: isFacilityDive ? 65 : 50,
+    bearing,
+    duration: isFacilityDive ? 2400 : 1800,
+    curve: 1.5,
+    speed: 0.7,
+    essential: true,
+  });
+}
 
 let popup = new maplibregl.Popup({ closeOnClick: true, closeButton: false, maxWidth: "220px" });
 
@@ -428,7 +498,7 @@ function closeSearchResults() {
 function selectSearchResult(idx) {
   const f = searchResultFeatures[idx];
   if (!f) return;
-  map.flyTo({ center: f.geometry.coordinates, zoom: 13 });
+  cinematicFlyTo({ center: f.geometry.coordinates, zoom: 13 });
   highlightFacility(f);
   renderDetail(f);
   const input = document.getElementById("search");
@@ -470,7 +540,7 @@ function zoomToFiltered() {
     // Zoom to full country
     const iso = currentData?.metadata?.iso3 || "NGA";
     const v = VIEWS[iso] || VIEWS.NGA;
-    map.flyTo({ center: v.center, zoom: v.zoom });
+    cinematicFlyTo({ center: v.center, zoom: IS_3D ? Math.max(v.zoom - 1.5, 3) : v.zoom });
     return;
   }
   // Compute bounds of filtered features
@@ -891,7 +961,7 @@ function renderTopList() {
       if (!f) return;
       host.querySelectorAll(".crit-row").forEach(r => r.classList.remove("active"));
       el.classList.add("active");
-      map.flyTo({ center: f.geometry.coordinates, zoom: 13 });
+      cinematicFlyTo({ center: f.geometry.coordinates, zoom: 13 });
       highlightFacility(f);
       renderDetail(f);
     });
@@ -1014,7 +1084,7 @@ function updateTableContents(overlay) {
       const f = filteredFeatures.find(ff => ff.properties.id === tr.dataset.id);
       if (!f) return;
       closeDataTable();
-      map.flyTo({ center: f.geometry.coordinates, zoom: 13 });
+      cinematicFlyTo({ center: f.geometry.coordinates, zoom: 13 });
       highlightFacility(f);
       renderDetail(f);
     });
@@ -1157,8 +1227,13 @@ async function switchCountry(iso3) {
   document.body.classList.remove("has-detail");
   document.querySelector(".detail-wrap")?.setAttribute("aria-hidden", "true");
 
-  // Start the map fly animation immediately
-  map.flyTo({ center: v.center, zoom: v.zoom });
+  // Start the map fly animation immediately. In 3D, ease out to a slightly
+  // wider pitched view so country switching feels like swinging across the
+  // globe rather than warping to a new flat patch.
+  cinematicFlyTo({
+    center: v.center,
+    zoom: IS_3D ? Math.max(v.zoom - 1.5, 3) : v.zoom,
+  });
 
   // --- 2. ASYNC DATA FETCH (with streaming progress) ---------------------
   const data = await loadAtlas(iso3, { showProgress: true });
