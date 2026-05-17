@@ -542,19 +542,24 @@ function hideSpotlightPopup() {
 }
 
 function finishSpotlight() {
-  // End of the curated reel — arc back out to the country overview so the
-  // reel ends on the same wide framing it opened on. Higher curve so the
-  // exit feels like a final pullback into space, not just a flat zoom-out.
+  // End of the curated reel — arc back out to the country overview AND
+  // snap bearing to 0 so the view resets to the clean north-up framing
+  // the user landed on. Previously we kept the spotlight's residual
+  // bearing, which left the camera tilted off-axis: Nigeria appeared
+  // stretched, the atmosphere read overly warm, and labels misaligned
+  // (see Pere's screenshot comparison). The intro spin will re-introduce
+  // rotation on the next click; the finish should leave a clean slate.
   const iso = currentData?.metadata?.iso3 || "NGA";
   const v = VIEWS[iso] || VIEWS.NGA;
   map.flyTo({
     center: v.center,
     zoom: Math.max(v.zoom - 1.0, 3.5),
     pitch: 55,
-    bearing: map.getBearing(),  // keep current rotation rather than snap to 0
+    bearing: 0,
     duration: 2800,
     curve: 1.8,
     speed: 0.7,
+    essential: true,
   });
   stopSpotlight();
   // Reset for next run — next click plays the intro spin again, rebuilds queue.
