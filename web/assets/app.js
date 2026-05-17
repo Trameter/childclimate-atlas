@@ -338,22 +338,29 @@ const SPOTLIGHT_CONTRAST_LOW_N = 1;
 // Pacing knobs. The whole reel is paced for storytelling — the user clicked
 // a button asking to be shown something, so we take the time to actually
 // show it rather than rush through.
-const SPOTLIGHT_INTRO_MS = 7000;       // opening globe spin — “scanning” beat
-const SPOTLIGHT_INTRO_BEARING = 70;    // degree magnitude (subtracted at use
-                                       // site = clockwise = right-spinning)
-const SPOTLIGHT_FLY_MS = 3200;         // NEAR arc duration (≤ FAR threshold)
-const SPOTLIGHT_FLY_MS_FAR = 7000;     // FAR arc duration — long enough for the
-                                       // camera to climb way out into space
-                                       // and dive back down, not just lerp
-const SPOTLIGHT_FLY_CURVE = 2.2;       // near-arc curve
-const SPOTLIGHT_FLY_CURVE_FAR = 4.0;   // far-arc curve — dramatic pullback
+//
+// Walking-pace metaphor (Pere's framing): a parent walking with a young
+// child shouldn't stride so fast the child has to run to keep up. Slower
+// motion lets the eye follow what's happening, lets the brain register the
+// info in each popup, and stops the whole thing feeling dizzy.
+const SPOTLIGHT_INTRO_MS = 10000;        // opening globe spin — “scanning” beat
+const SPOTLIGHT_INTRO_BEARING = 70;      // degree magnitude (subtracted at use
+                                         // site = clockwise = right-spinning)
+const SPOTLIGHT_FLY_MS = 5000;           // NEAR arc duration — dives have weight
+const SPOTLIGHT_FLY_MS_FAR = 9500;       // FAR arc duration — enough time for the
+                                         // camera to climb out to globe view
+                                         // and dive back down, not snap
+const SPOTLIGHT_FLY_CURVE = 2.5;         // near-arc curve
+const SPOTLIGHT_FLY_CURVE_FAR = 4.5;     // far-arc curve — dramatic pullback
+const SPOTLIGHT_FLY_SPEED_NEAR = 0.4;    // lower = slower apparent motion
+const SPOTLIGHT_FLY_SPEED_FAR = 0.3;     // lower still for far arcs
 const SPOTLIGHT_FAR_THRESHOLD_DEG = 2.0; // degree distance threshold for
                                          // far-vs-near pacing branch
 const SPOTLIGHT_FLY_BEARING_SPREAD = 60; // bearing jitter per arc, in degrees
-const SPOTLIGHT_DWELL_MS = 4000;       // popup dwell per facility (read time)
-const SPOTLIGHT_OUTRO_PULLBACK_MS = 3200;  // phase 1 of close: pull to globe + spin
-const SPOTLIGHT_OUTRO_SETTLE_MS = 3500;    // phase 2 of close: settle to country
-const SPOTLIGHT_OUTRO_BEARING = 75;        // bearing sweep during pullback
+const SPOTLIGHT_DWELL_MS = 4000;         // popup dwell per facility (read time)
+const SPOTLIGHT_OUTRO_PULLBACK_MS = 4500; // phase 1 of close: pull to globe + spin
+const SPOTLIGHT_OUTRO_SETTLE_MS = 4800;   // phase 2 of close: settle to country
+const SPOTLIGHT_OUTRO_BEARING = 75;       // bearing sweep during pullback
 let tourActive = false;
 let spotlightQueue = [];     // ordered array of facility features to visit
 let spotlightIdx = 0;        // index of the NEXT stop to visit (resume token)
@@ -474,7 +481,7 @@ function visitNextSpotlightStop() {
   const isFar = dSq > SPOTLIGHT_FAR_THRESHOLD_DEG ** 2;
   const flyMs = isFar ? SPOTLIGHT_FLY_MS_FAR : SPOTLIGHT_FLY_MS;
   const flyCurve = isFar ? SPOTLIGHT_FLY_CURVE_FAR : SPOTLIGHT_FLY_CURVE;
-  const flySpeed = isFar ? 0.42 : 0.55;
+  const flySpeed = isFar ? SPOTLIGHT_FLY_SPEED_FAR : SPOTLIGHT_FLY_SPEED_NEAR;
 
   // Bearing jitter (±SPOTLIGHT_FLY_BEARING_SPREAD/2) ensures consecutive
   // arcs don't look identical. We don't bias direction — random across
