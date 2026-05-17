@@ -37,6 +37,20 @@ function prettyKey(k) {
   return M[k] || k.replace(/_/g, " ");
 }
 function typeIcon(t) { return t === "hospital" ? "\u{1F3E5}" : t === "clinic" ? "\u{1FA7A}" : "\u{1F3EB}"; }
+// HTML escape for any string interpolated into innerHTML / setHTML / document.write.
+// Required because much of our data comes from OpenStreetMap, which is
+// publicly editable — a contributor could put `<img src=x onerror=...>` in
+// a facility name tag and it would execute when the atlas renders it.
+// Always call this on facility names, admin-level strings, and any
+// downstream property derived from them before string-interpolation into
+// markup. CSP in .htaccess is the second line of defense.
+function escapeHtml(s) {
+  if (s === null || s === undefined) return "";
+  return String(s).replace(/[&<>"'`]/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;",
+    '"': "&quot;", "'": "&#39;", "`": "&#96;",
+  })[c]);
+}
 // Normalize display-casing for OSM names that are entered in ALL CAPS.
 // A string is "shouty" if >=70% of its letters are uppercase AND it's long
 // enough for that to be meaningful (<=4-char strings like "NHS" pass through).
@@ -287,7 +301,7 @@ function populateStates(features) {
     const opt = document.createElement("div");
     opt.className = "state-opt";
     opt.dataset.value = s;
-    opt.innerHTML = `<span>${s}</span><span class="cnt">${c}</span>`;
+    opt.innerHTML = `<span>${escapeHtml(s)}</span><span class="cnt">${c}</span>`;
     panel.appendChild(opt);
   });
 
@@ -380,11 +394,11 @@ function renderSearchResults(query) {
     if (typeCap && !typeInName) subParts.push(typeCap);
     if (state) subParts.push(state);
     const subText = subParts.join(" · ");
-    return `<div class="search-result${i === 0 ? " hl" : ""}" role="option" data-id="${p.id}" data-idx="${i}">
+    return `<div class="search-result${i === 0 ? " hl" : ""}" role="option" data-id="${escapeHtml(p.id)}" data-idx="${i}">
       <span class="d" style="background:${bandColor(s)}"></span>
       <div class="meta">
-        <span class="t">${name}</span>
-        ${subText ? `<span class="sub">${subText}</span>` : ""}
+        <span class="t">${escapeHtml(name)}</span>
+        ${subText ? `<span class="sub">${escapeHtml(subText)}</span>` : ""}
       </div>
       <span class="s">${s.toFixed(0)}</span>
     </div>`;
@@ -549,7 +563,7 @@ function updateMap() {
     if (!e.features.length) return;
     const p = e.features[0].properties;
     popup.setLngLat(e.lngLat)
-      .setHTML(`<b>${displayName(e.features[0])}</b><br/>${typeIcon(p.facility_type)} ${p.facility_type} &middot; <span style="color:${bandColor(p.risk_score)};font-weight:700">${p.risk_score}</span>`)
+      .setHTML(`<b>${escapeHtml(displayName(e.features[0]))}</b><br/>${typeIcon(p.facility_type)} ${escapeHtml(p.facility_type)} &middot; <span style="color:${bandColor(p.risk_score)};font-weight:700">${p.risk_score}</span>`)
       .addTo(map);
   });
   map.on("mouseleave", "facilities", () => { map.getCanvas().style.cursor = ""; popup.remove(); });
@@ -768,11 +782,11 @@ function renderDetail(feature) {
   document.getElementById("detail").innerHTML = `
     <div class="head">
       <div class="kicker">
-        <span class="ftype">${ftype}${osmId ? " · ID " + osmId : ""}</span>
+        <span class="ftype">${escapeHtml(ftype)}${osmId ? " · ID " + escapeHtml(String(osmId)) : ""}</span>
         <span class="coords">${latStr} · ${lonStr}</span>
       </div>
-      <h2>${displayName(feature)}</h2>
-      <div class="loc">${stateName && stateName !== "Untagged Region" ? stateName + ", " : ""}${country}</div>
+      <h2>${escapeHtml(displayName(feature))}</h2>
+      <div class="loc">${stateName && stateName !== "Untagged Region" ? escapeHtml(stateName) + ", " : ""}${escapeHtml(country)}</div>
 
       <div class="score-block ${b}">
         <div class="score-num">${s.toFixed(0)}</div>
@@ -857,9 +871,9 @@ function renderTopList() {
   host.innerHTML = `
     ${sorted.map(f => {
       const p = f.properties; const s = p.risk_score;
-      return `<div class="crit-row" data-id="${p.id}">
+      return `<div class="crit-row" data-id="${escapeHtml(p.id)}">
         <span class="d" style="background:${bandColor(s)}"></span>
-        <span class="n" title="${displayName(f).replace(/"/g, '&quot;')}">${displayName(f)}</span>
+        <span class="n" title="${escapeHtml(displayName(f))}">${escapeHtml(displayName(f))}</span>
         <span class="s">${s.toFixed(0)}</span>
       </div>`;
     }).join("")}
@@ -920,7 +934,7 @@ function buildOverlayShell() {
     <div class="overlay-panel">
       <div class="overlay-header">
         <div>
-          <h2>All Facilities — ${country}${state !== "All Regions" ? " / " + state : ""}</h2>
+          <h2>All Facilities — ${escapeHtml(country)}${state !== "All Regions" ? " / " + escapeHtml(state) : ""}</h2>
           <p class="overlay-subtitle"></p>
         </div>
         <div class="overlay-controls">
@@ -984,13 +998,13 @@ function updateTableContents(overlay) {
     const s = p.risk_score;
     const drivers = typeof p.top_drivers === "string" ? JSON.parse(p.top_drivers) : (p.top_drivers || []);
     const recs = typeof p.recommendations === "string" ? JSON.parse(p.recommendations) : (p.recommendations || []);
-    return `<tr data-id="${p.id}">
+    return `<tr data-id="${escapeHtml(p.id)}">
       <td>${i + 1}</td>
-      <td class="name-cell" title="${displayName(f).replace(/"/g, '&quot;')}">${typeIcon(p.facility_type)} ${displayName(f)}</td>
-      <td>${p.facility_type}</td>
+      <td class="name-cell" title="${escapeHtml(displayName(f))}">${typeIcon(p.facility_type)} ${escapeHtml(displayName(f))}</td>
+      <td>${escapeHtml(p.facility_type)}</td>
       <td><span class="table-badge ${band(s)}">${s.toFixed(0)}</span></td>
-      <td>${(drivers[0] || "").replace(/_/g, " ")}</td>
-      <td>${recs.length ? recs[0].title : "\u2014"}</td>
+      <td>${escapeHtml((drivers[0] || "").replace(/_/g, " "))}</td>
+      <td>${recs.length ? escapeHtml(recs[0].title) : "—"}</td>
     </tr>`;
   }).join("");
 
@@ -1301,7 +1315,7 @@ function printSummary() {
   const top10 = [...filteredFeatures].sort((a, b) => b.properties.risk_score - a.properties.risk_score).slice(0, 10);
 
   const win = window.open("", "_blank");
-  win.document.write(`<!doctype html><html><head><title>ChildClimate Atlas Report — ${m.country}</title>
+  win.document.write(`<!doctype html><html><head><title>ChildClimate Atlas Report — ${escapeHtml(m.country)}</title>
     <style>body{font-family:-apple-system,system-ui,sans-serif;max-width:820px;margin:40px auto;color:#1E2433;line-height:1.55}
     h1{font-size:22px;border-bottom:2px solid #C96A3F;padding-bottom:8px;letter-spacing:-0.01em}
     h2{font-size:15px;letter-spacing:0.04em;text-transform:uppercase;color:#6B7289;margin-top:24px}
@@ -1315,9 +1329,9 @@ function printSummary() {
     .severe{background:rgba(195,82,72,0.16);color:#8C2B24}
     .footer{margin-top:32px;font-size:11px;color:#9AA0B3;border-top:1px solid #EDEAE2;padding-top:12px}
     </style></head><body>
-    <h1>ChildClimate Risk Atlas — ${m.country}</h1>
-    <p><b>Region:</b> ${m.focus_region} | <b>Facilities analyzed:</b> ${n} | <b>Average risk:</b> ${avg}/100</p>
-    <p><b>Generated:</b> ${new Date().toLocaleDateString()} | <b>Pipeline v${m.pipeline_version || "0.1.0"}</b></p>
+    <h1>ChildClimate Risk Atlas — ${escapeHtml(m.country)}</h1>
+    <p><b>Region:</b> ${escapeHtml(m.focus_region)} | <b>Facilities analyzed:</b> ${n} | <b>Average risk:</b> ${avg}/100</p>
+    <p><b>Generated:</b> ${new Date().toLocaleDateString()} | <b>Pipeline v${escapeHtml(m.pipeline_version || "0.1.0")}</b></p>
 
     <h2>Top 10 Most Critical Facilities</h2>
     <table>
@@ -1328,11 +1342,11 @@ function printSummary() {
         const drivers = typeof p.top_drivers === "string" ? JSON.parse(p.top_drivers) : (p.top_drivers || []);
         return `<tr>
           <td>${i + 1}</td>
-          <td>${displayName(f)}</td>
-          <td>${p.facility_type}</td>
+          <td>${escapeHtml(displayName(f))}</td>
+          <td>${escapeHtml(p.facility_type)}</td>
           <td><span class="badge ${band(p.risk_score)}">${p.risk_score}</span></td>
-          <td>${(drivers[0] || "").replace(/_/g, " ")}</td>
-          <td>${recs.length ? recs[0].title : "\u2014"}</td>
+          <td>${escapeHtml((drivers[0] || "").replace(/_/g, " "))}</td>
+          <td>${recs.length ? escapeHtml(recs[0].title) : "—"}</td>
         </tr>`;
       }).join("")}
     </table>

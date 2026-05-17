@@ -81,7 +81,50 @@ AddDefaultCharset UTF-8
 </IfModule>
 
 # ----- 5. Security headers
+#
+# The atlas is a read-only static site (no auth, no cookies, no PII),
+# so this is defense-in-depth — not a guard around sensitive state.
+# Reviewed against OWASP Top 10 (2021) — see security audit notes in
+# the commit that introduced this block.
 <IfModule mod_headers.c>
   Header set X-Content-Type-Options "nosniff"
   Header set Referrer-Policy "strict-origin-when-cross-origin"
+
+  # Clickjacking — the page should never be framed by anyone.
+  # Belt-and-braces alongside the CSP frame-ancestors directive below.
+  Header set X-Frame-Options "DENY"
+
+  # HSTS — once a visitor has had one successful https hit, the browser
+  # refuses to downgrade to http for 2 years. No `preload` until we're
+  # sure no other *.trameter.com subdomain is on plain http.
+  Header set Strict-Transport-Security "max-age=63072000; includeSubDomains"
+
+  # Content Security Policy.
+  # Defense-in-depth against the XSS surface in app.js (we also escape
+  # at the insertion site, but CSP blocks exfiltration if escaping ever
+  # has a bug). Everything is self-hosted now except the Carto basemap
+  # tiles (raster PNGs). 'unsafe-inline' on style-src is required
+  # because the markup uses `style="..."` attributes on swatches and
+  # the JS interpolates inline styles into innerHTML strings.
+  # blob: on worker-src is required because MapLibre constructs its
+  # worker via a Blob URL.
+  Header set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.basemaps.cartocdn.com; font-src 'self'; connect-src 'self' https://*.basemaps.cartocdn.com; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://tally.so; object-src 'none'; upgrade-insecure-requests"
 </IfModule>
+
+# ----- 6. Don't expose deploy state or any other dotfile.
+# The FTP-Deploy-Action ships a `.ftp-deploy-sync-state.json` manifest
+# listing every file path, size, and SHA-256 hash. The server defaults
+# to serving it as a static asset. Deny it and every other hidden file
+# (covers .htaccess, .gitignore, .env if one ever sneaks into the
+# upload, etc.). Requests to /.well-known/security.txt still work
+# because the directory name is hidden but the served basename isn't.
+<FilesMatch "^\.">
+  Require all denied
+</FilesMatch>
+
+# ----- 7. No directory listings.
+# LiteSpeed's autoindex was happily listing /data/ as a public file
+# browser — useful for nothing the user couldn't get from the loaded
+# GeoJSON anyway, but it exposed timestamps for future-country drops
+# before we'd announced them. Off by default.
+Options -Indexes
