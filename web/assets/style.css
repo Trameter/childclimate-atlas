@@ -63,21 +63,22 @@ button { font-family: inherit; }
 /* =========================================================================
    TOP BAR
    ========================================================================= */
+/* Topbar is FIXED (not sticky) so it's always pinned to the absolute top
+   of the viewport with no chance of a gap above it. High z-index keeps it
+   above MapLibre's WebGL canvas (which renders the bright atmosphere
+   glow). Solid background — no backdrop-filter — means the atmosphere
+   never bleeds through as a milky-white wash. */
 .topbar {
-  position: sticky; top: 0; z-index: 30;
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 28px;
   border-bottom: 1px solid var(--rule);
-  /* Solid background, no backdrop-filter. The previous translucent ink
-     (0.92 alpha) + blur(10px) was a frosted-glass effect that read fine
-     against a uniformly dark map but, on /3d when the camera tilts up
-     and the atmospheric horizon glow reaches the top of the viewport,
-     the 8% transparency let the bright atmosphere bleed through as a
-     milky white wash. Solid ink-2 is consistent across both modes and
-     in every camera state. */
   background: var(--ink-2);
   height: var(--topbar-h);
 }
+/* Because .topbar is now fixed (out of flow), .shell needs an explicit
+   top offset so content doesn't slide under it. */
+.shell { margin-top: var(--topbar-h); }
 .brand {
   display: flex; align-items: center; gap: 12px;
   color: var(--paper);

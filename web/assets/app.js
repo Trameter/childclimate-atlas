@@ -477,11 +477,19 @@ function resumeSpotlight() {
   if (!tourActive || !spotlightPaused) return;
   spotlightPaused = false;
   setTourButtonState();
+  // Auto-close the right detail panel when resuming — the spotlight needs
+  // the map area unobstructed for its cinematic moves, and the panel is
+  // tied to the now-paused drill-down. Both directions automate cleanly:
+  // closing the panel resumes the spotlight (handled in the close-button
+  // wiring); clicking Resume closes the panel (handled here).
+  if (document.body.classList.contains("has-detail")) {
+    closeDetail();
+  }
   // Advance past the stop the user just drilled into — they've already
   // seen that one in full detail, no need to re-visit. The brief setTimeout
   // gives the close-detail animation a beat to start.
   spotlightIdx++;
-  spotlightTimer = setTimeout(visitNextSpotlightStop, 250);
+  spotlightTimer = setTimeout(visitNextSpotlightStop, 350);
 }
 
 // 3-second world-spin that opens a fresh spotlight reel. Pulls the camera
