@@ -1246,15 +1246,21 @@ function updateMap() {
   // 2D ↔ 3D toggle uses setupPulseLayer/teardownPulseLayer below to
   // add or strip the layer on the fly without re-adding the source.
   if (IS_3D) setupPulseLayer();
-  // Selected facility highlight — single ring, same palette as the dots
+  // Selected facility highlight — paper-white ring so the selection is
+  // visible regardless of band color. The previous implementation used
+  // RISK_STOPS for the stroke (band-colored ring) which made the ring
+  // invisible when the selected facility's risk band matched the
+  // surrounding dots (e.g., orange ring around orange dot in a HIGH
+  // cluster). Paper-white contrasts against every band + the dark map.
   map.addSource("selected", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({
     id: "selected-ring", type: "circle", source: "selected",
     paint: {
-      "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 12, 10, 18, 14, 24],
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 14, 10, 22, 14, 30],
       "circle-color": "rgba(0,0,0,0)",
-      "circle-stroke-color": RISK_STOPS,
+      "circle-stroke-color": "#FAF8F4",  // var(--paper) — always contrasts
       "circle-stroke-width": 3,
+      "circle-stroke-opacity": 0.95,
     },
   });
 
@@ -1363,7 +1369,17 @@ function renderStats() {
 
 // ---- highlight selected facility ----
 function highlightFacility(feature) {
-  if (!map.isStyleLoaded() || !map.getSource("selected")) return;
+  // Don't gate on isStyleLoaded — setData on a known source is safe even
+  // during transient style states. The previous gating sometimes bailed
+  // during cinematic flyTo and the ring never set, so a URL-opened
+  // facility would have the detail panel but no ring on the map.
+  if (!map.getSource("selected")) {
+    // Source not yet added (first frames before updateMap runs). Retry
+    // once the map settles so a fast URL-driven open doesn't drop the
+    // highlight request.
+    if (feature) map.once("idle", () => highlightFacility(feature));
+    return;
+  }
   // Reflect the selection in the URL so the current view is shareable.
   // Null/clear is handled separately by closeDetail() so we don't strip
   // the param every time the selection is just being moved.
