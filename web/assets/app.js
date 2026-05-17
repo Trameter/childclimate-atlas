@@ -2278,16 +2278,16 @@ async function switchCountry(iso3) {
   document.body.classList.remove("has-detail");
   document.querySelector(".detail-wrap")?.setAttribute("aria-hidden", "true");
 
-  // Start the map fly animation immediately. In 3D, ease out to a slightly
-  // wider pitched view so country switching feels like swinging across the
-  // globe rather than warping to a new flat patch.
-  //
-  // ALSO in 3D: draw a glowing great-circle arc on the globe surface from
-  // the previous country's center to this one. Lights up while the camera
-  // is in flight, fades after arrival. Skip if there's no previous center
-  // (initial load) or if previous == current (same country reselect).
-  if (IS_3D && _prevCountryCenter
-      && (_prevCountryCenter[0] !== v.center[0] || _prevCountryCenter[1] !== v.center[1])) {
+  // Country-switch trail (3D only): a great-circle arc drawn on the globe
+  // surface from the previous country's center (or actual camera position
+  // if user panned) to this one. The line's head follows the camera as it
+  // flies. Skip on initial load (no previous center) and same-country
+  // reselect (no journey to draw). Capturing the condition into a const so
+  // the same gate also drives the post-flight data-apply below.
+  const willAnimateTrail = IS_3D && _prevCountryCenter !== null
+    && (_prevCountryCenter[0] !== v.center[0] || _prevCountryCenter[1] !== v.center[1]);
+
+  if (willAnimateTrail) {
     // Use the actual current camera position as the trail's start — if the
     // user panned away from the previous country's nominal center, the line
     // should start where the camera ACTUALLY is so it tracks the flight.
@@ -2302,7 +2302,29 @@ async function switchCountry(iso3) {
   });
 
   // --- 2. ASYNC DATA FETCH (with streaming progress) ---------------------
-  const data = await loadAtlas(iso3, { showProgress: true });
+  // Kick the fetch off in parallel with the flyTo so by the time the
+  // camera arrives the data is usually already sitting in memory.
+  const dataPromise = loadAtlas(iso3, { showProgress: true });
+
+  // If we're animating a trail, hold the heavy applyFilters + setData work
+  // until BOTH the data has landed AND the camera animation has finished
+  // (moveend). The setData call re-tiles ~50K features and blocks the main
+  // thread for 200-400ms; landing that mid-flight froze the trail's per-
+  // frame head update — visible as the line "getting cut off" before it
+  // reached the destination. Initial load and same-country reselect skip
+  // the wait so dots paint as fast as possible.
+  let data;
+  if (willAnimateTrail) {
+    const moveEndPromise = new Promise(resolve => {
+      // Safety net: if moveend never fires (camera was already at the
+      // destination, etc.), don't hang the country switch.
+      const t = setTimeout(resolve, 6000);
+      map.once("moveend", () => { clearTimeout(t); resolve(); });
+    });
+    [data] = await Promise.all([dataPromise, moveEndPromise]);
+  } else {
+    data = await dataPromise;
+  }
   currentData = data;
   allFeatures = data.features || [];
 
