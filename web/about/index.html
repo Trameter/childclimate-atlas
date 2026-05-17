@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en" translate="no">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#181E2D" />
+  <title>About · ChildClimate Risk Atlas — Trameter</title>
+  <meta name="description" content="How the ChildClimate Risk Atlas computes its 0–100 facility risk score: methodology, sub-score weights, data sources, and honest limitations." />
+  <meta name="google" content="notranslate" />
+
+  <meta property="og:title" content="About the ChildClimate Risk Atlas" />
+  <meta property="og:description" content="Methodology, weights, data sources, and limitations behind the 0–100 facility risk score." />
+  <meta property="og:type" content="article" />
+  <meta property="og:url" content="https://climate-atlas.trameter.com/about" />
+  <meta property="og:image" content="https://climate-atlas.trameter.com/docs/atlas-screenshot.png" />
+
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+  <link rel="stylesheet" href="/assets/style.css" />
+  <link rel="stylesheet" href="/about/about.css" />
+</head>
+<body class="is-about">
+
+  <!-- Topbar — same shell as the atlas pages -->
+  <header class="topbar">
+    <button type="button" class="mobile-menu-btn" id="btn-mobile-menu" aria-label="Open menu" aria-expanded="false">
+      <span class="mm-bars" aria-hidden="true"></span>
+    </button>
+    <a class="brand" href="/" aria-label="ChildClimate Atlas home">
+      <svg class="logo-mark" width="28" height="28" viewBox="0 0 76 76" aria-hidden="true">
+        <circle cx="38" cy="38" r="34" fill="none" stroke="currentColor" stroke-width="2.5"/>
+        <circle cx="38" cy="22" r="5.5" fill="var(--ember)"/>
+      </svg>
+      <span class="wm"><b>ChildClimate</b> <span>Atlas</span></span>
+    </a>
+    <nav class="nav" aria-label="Primary">
+      <a href="/">Atlas</a>
+      <a href="/about" class="active">About</a>
+    </nav>
+    <div class="right">
+      <div class="view-toggle" role="tablist" aria-label="Map view">
+        <a href="/" class="vt-btn" title="Working data view — 2D map">2D</a>
+        <a href="/3d" class="vt-btn" title="Immersive view — 3D globe">3D</a>
+      </div>
+      <span class="chip"><span class="dot"></span><span>v0.2 · 62,817 facilities</span></span>
+      <a class="btn" href="https://github.com/Trameter/childclimate-atlas" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </header>
+
+  <!-- About content -->
+  <main class="about-wrap">
+    <article class="about">
+
+      <header class="about-hero">
+        <div class="eyebrow"><span class="mono">Trameter · Methodology · MIT</span></div>
+        <h1>How the Atlas works.</h1>
+        <p class="lede">A facility-level 0–100 score for the climate risk children face at the school or clinic they depend on. This page explains what the score means, how it's built, and where it falls short.</p>
+      </header>
+
+      <!-- Mission -->
+      <section class="about-section">
+        <h2>Mission</h2>
+        <p>Most climate-vulnerability assessments stop at the country or district level. But money gets spent on specific buildings, not countries. The Atlas pushes vulnerability scoring down to the <strong>facility level</strong>, so the question "which clinic should we harden first?" has a data-backed answer for any country.</p>
+        <p>The audience is the people who actually allocate adaptation budgets: country ministries of health and education, UNICEF country offices, NGOs running facility-strengthening programmes, and journalists covering the climate-equity beat.</p>
+      </section>
+
+      <!-- Methodology -->
+      <section class="about-section">
+        <h2>The score</h2>
+        <p>Each facility gets a single 0–100 number — the <strong>Child Climate Risk Score</strong> — that answers <em>how dangerous is the climate becoming for the children who rely on this facility?</em> The score is a weighted sum of six sub-scores, all 0–1, capturing the hazard, the population at stake, and the facility's ability to keep operating.</p>
+
+        <h3>Sub-score weights</h3>
+        <table class="about-table">
+          <thead><tr><th>Sub-score</th><th>Weight</th><th>What it measures</th></tr></thead>
+          <tbody>
+            <tr><td>Heat exposure</td><td class="mono">25%</td><td>Days/year above 35°C apparent temperature, from ERA5 reanalysis.</td></tr>
+            <tr><td>Air pollution</td><td class="mono">25%</td><td>PM2.5 30-day average + hours above the WHO 15 µg/m³ short-term guideline, from Copernicus CAMS.</td></tr>
+            <tr><td>Child-population density</td><td class="mono">15%</td><td>Under-18 catchment within facility access radius, from WorldPop + UN DESA shares.</td></tr>
+            <tr><td>Flood risk</td><td class="mono">15%</td><td>Heavy-precipitation days (≥50 mm) as a flood proxy. JRC global flood maps planned for v0.3.</td></tr>
+            <tr><td>Drought risk</td><td class="mono">10%</td><td>Longest consecutive dry-day run in the last year.</td></tr>
+            <tr><td>Facility fragility</td><td class="mono">10%</td><td>Power, water, structure priors from OSM tags. WHO SARA / UNICEF EMIS integration planned for v0.3.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Risk bands</h3>
+        <div class="band-row">
+          <div class="band-pill low"><span class="sw"></span>Low<span class="r">0–29</span></div>
+          <div class="band-pill mid"><span class="sw"></span>Moderate<span class="r">30–54</span></div>
+          <div class="band-pill high"><span class="sw"></span>High<span class="r">55–74</span></div>
+          <div class="band-pill sev"><span class="sw"></span>Severe<span class="r">75–100</span></div>
+        </div>
+
+        <h3>Recommendations</h3>
+        <p>Each facility gets up to 3 prioritised actions, generated by a <strong>rule-based</strong> system (not an LLM) for reproducibility and auditability. Each rule maps a measurable condition to a specific intervention, a priority, and a USD cost range — e.g. "if 60+ consecutive dry days and the facility is a clinic, install a solar-powered borehole, $3,000–8,000." Rules live in <code>pipeline/scoring/recommendations.py</code> in the open-source repo.</p>
+        <p>Recommendations are ordered to mirror the facility's top drivers wherever a rule exists. Some drivers (like child-population density) appear in the panel only to explain the score — there's no facility-level fix for them, so they don't produce a recommendation.</p>
+      </section>
+
+      <!-- Data sources -->
+      <section class="about-section">
+        <h2>Data sources</h2>
+        <table class="about-table">
+          <thead><tr><th>Layer</th><th>Source</th><th>Licence</th></tr></thead>
+          <tbody>
+            <tr><td>Health facilities (Nigeria)</td><td><a href="https://doi.org/10.7916/kv1n-0743" target="_blank" rel="noopener">GRID3 NGA Health Facilities v2.0</a> (CIESIN / Columbia, incorporates NHFR 2024)</td><td>CC BY 4.0</td></tr>
+            <tr><td>Health facilities (other)</td><td><a href="https://healthsites.io" target="_blank" rel="noopener">Healthsites.io</a> / OSM</td><td>ODbL</td></tr>
+            <tr><td>Schools</td><td><a href="https://projectconnect.unicef.org" target="_blank" rel="noopener">GIGA</a> / OSM</td><td>ODbL</td></tr>
+            <tr><td>Climate (heat, precip, drought)</td><td><a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> / ERA5</td><td>CC-BY</td></tr>
+            <tr><td>Air quality (PM2.5, NO₂)</td><td><a href="https://atmosphere.copernicus.eu" target="_blank" rel="noopener">Copernicus CAMS</a></td><td>Open</td></tr>
+            <tr><td>Child population</td><td><a href="https://www.worldpop.org" target="_blank" rel="noopener">WorldPop</a> + UN DESA</td><td>CC-BY</td></tr>
+            <tr><td>Roads / access</td><td><a href="https://www.openstreetmap.org" target="_blank" rel="noopener">OpenStreetMap</a></td><td>ODbL</td></tr>
+          </tbody>
+        </table>
+        <p class="muted">Climate and air-quality values are sampled on a strided grid (one sample per N facilities) and nearest-neighbour interpolated for the rest. At Nigeria's scale (50K facilities) this is the only tractable way; the per-coordinate cache means re-runs cost only the new sample points.</p>
+      </section>
+
+      <!-- Limitations -->
+      <section class="about-section">
+        <h2>Honest limitations</h2>
+        <ul>
+          <li><strong>Prototype.</strong> v0.2. Nigeria is the most-polished country; Bangladesh and Guatemala follow. Methodology will tighten as we onboard more countries.</li>
+          <li><strong>Facility fragility is heuristic.</strong> We infer power, water, and structure status from OpenStreetMap tags, which are uneven. WHO SARA + UNICEF EMIS integration on the v0.3 roadmap will replace this with real facility-audit data.</li>
+          <li><strong>Flood is a proxy.</strong> We count heavy-precipitation days as a flash-flood proxy. JRC Global Flood Hazard maps are a more accurate signal and are planned.</li>
+          <li><strong>Climate sampling is gridded.</strong> Facilities within ~1–5 km of a sampled point share that climate value. Climate varies slowly at this scale so the approximation is reasonable, but a denser stride (compute-heavy) would refine the upper tail of the score distribution.</li>
+          <li><strong>Not for routing or compliance.</strong> The score is a prioritisation aid, not a regulatory verdict. A facility scoring 65 isn't safer than a facility scoring 70 by any single hazard — they're different blends.</li>
+        </ul>
+      </section>
+
+      <!-- Citation + contact -->
+      <section class="about-section">
+        <h2>Cite the Atlas</h2>
+        <p class="cite">Trameter. <em>ChildClimate Risk Atlas v0.2.</em> 2026. <a href="https://climate-atlas.trameter.com" target="_blank" rel="noopener">climate-atlas.trameter.com</a>. MIT licence. Source: <a href="https://github.com/Trameter/childclimate-atlas" target="_blank" rel="noopener">github.com/Trameter/childclimate-atlas</a>.</p>
+        <p><strong>Nigeria facilities citation:</strong> Center for Integrated Earth System Information (CIESIN), Columbia University. 2024. <em>GRID3 NGA — Health Facilities v2.0</em>. New York: GRID3. <a href="https://doi.org/10.7916/kv1n-0743" target="_blank" rel="noopener">https://doi.org/10.7916/kv1n-0743</a>.</p>
+      </section>
+
+      <section class="about-section">
+        <h2>Contact</h2>
+        <p>Security disclosures: <a href="mailto:hello@trameter.com">hello@trameter.com</a>.<br>
+        Project lead: <a href="https://github.com/Trameter" target="_blank" rel="noopener">Trameter</a> on GitHub.<br>
+        Missing or wrong facility data: <a href="https://tally.so/r/gDNl6l" target="_blank" rel="noopener">flag it here</a>.</p>
+      </section>
+
+      <div class="about-cta">
+        <a class="cta-btn" href="/3d">Open the immersive view →</a>
+        <a class="cta-link" href="/">…or the working dashboard</a>
+      </div>
+
+    </article>
+  </main>
+
+  <footer>
+    <span>© 2026 Trameter</span>
+    <span class="mono">Data · OSM · GRID3 (CC BY 4.0) · Open-Meteo/ERA5 · Copernicus CAMS · WorldPop · WHO</span>
+    <span><a href="https://tally.so/r/gDNl6l" target="_blank" rel="noopener">Flag a missing facility</a></span>
+    <span><a href="https://github.com/Trameter/childclimate-atlas" target="_blank" rel="noopener">MIT · open source</a></span>
+  </footer>
+
+  <div class="mobile-backdrop" id="mobile-backdrop" aria-hidden="true"></div>
+
+  <script>
+    // Minimal JS — just the mobile menu toggle. The atlas's full app.js is
+    // overkill for a static page.
+    const mb = document.getElementById('btn-mobile-menu');
+    const bd = document.getElementById('mobile-backdrop');
+    function setOpen(open) {
+      document.body.classList.toggle('mobile-menu-open', open);
+      mb?.setAttribute('aria-expanded', open ? 'true' : 'false');
+      bd?.setAttribute('aria-hidden', open ? 'false' : 'true');
+    }
+    mb?.addEventListener('click', () => setOpen(!document.body.classList.contains('mobile-menu-open')));
+    bd?.addEventListener('click', () => setOpen(false));
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && document.body.classList.contains('mobile-menu-open')) setOpen(false);
+    });
+  </script>
+</body>
+</html>

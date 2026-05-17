@@ -2545,15 +2545,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // About nav — placeholder anchor for now; will route to real /about page later
-  const aboutNav = document.getElementById("nav-about");
-  if (aboutNav) {
-    aboutNav.addEventListener("click", (e) => {
-      e.preventDefault();
-      // Lightweight "coming soon" note for now
-      alert("The About page is coming soon. For now, the project README (linked via the GitHub button) has the full methodology and data sources.");
-    });
-  }
+  // About nav — routes to /about (real page). No JS handler needed: the
+  // anchor's href does the navigation. Kept here as a marker for future
+  // SPA-style intercept if we ever want to load /about without a reload.
 });
 
 // ---- heatmap layer toggle ----

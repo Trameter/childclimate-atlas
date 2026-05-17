@@ -25,21 +25,21 @@ _rule(
     lambda c, a, f: c.get("heat_index_days", 0) >= 120 and f["type"] in ("clinic", "hospital"),
     1, "Heat Resilience",
     "Install solar-powered cooling",
-    "This facility experiences extreme heat (120+ days/year above 35°C). Solar-powered fans or evaporative coolers protect patients and maintain vaccine cold-chain integrity.",
+    "This facility experiences extreme heat ({heat_days} days/year above 35°C). Solar-powered fans or evaporative coolers protect patients and maintain vaccine cold-chain integrity.",
     "2,000–5,000",
 )
 _rule(
     lambda c, a, f: c.get("heat_index_days", 0) >= 120 and f["type"] == "school",
     1, "Heat Resilience",
     "Install classroom cooling + hydration stations",
-    "Students endure dangerously hot classrooms 120+ days/year. Solar fans, reflective roofing, and water stations reduce heat illness and absenteeism.",
+    "Students endure dangerously hot classrooms {heat_days} days/year. Solar fans, reflective roofing, and water stations reduce heat illness and absenteeism.",
     "1,500–4,000",
 )
 _rule(
     lambda c, a, f: 60 <= c.get("heat_index_days", 0) < 120,
     3, "Heat Resilience",
     "Add reflective roof coating + shade structures",
-    "Moderate heat stress. Low-cost reflective coatings can reduce indoor temperatures by 5-8°C. Shade trees in schoolyards add protection.",
+    "Moderate heat stress ({heat_days} days/year above 35°C). Low-cost reflective coatings can reduce indoor temperatures by 5-8°C. Shade trees in schoolyards add protection.",
     "500–1,500",
 )
 
@@ -48,14 +48,14 @@ _rule(
     lambda c, a, f: a.get("pm25_avg_ugm3", 0) >= 50,
     1, "Air Quality",
     "Deploy air quality monitors + indoor filtration",
-    "PM2.5 levels exceed 50 µg/m³ (10x WHO guideline). Children here face severe respiratory risk. HEPA filtration in patient wards and classrooms, plus a real-time AQ monitor to trigger alerts.",
+    "PM2.5 averages {pm25} µg/m³ ({pm25_x_who}× the WHO 2021 annual guideline of 5 µg/m³). Children here face severe respiratory risk. HEPA filtration in patient wards and classrooms, plus a real-time AQ monitor to trigger alerts.",
     "1,000–3,000",
 )
 _rule(
     lambda c, a, f: 25 <= a.get("pm25_avg_ugm3", 0) < 50,
     2, "Air Quality",
     "Install basic air filtration + plant green barriers",
-    "PM2.5 is 5-10x WHO guideline. Basic filtration in enclosed areas plus tree/hedge barriers to reduce roadside pollution.",
+    "PM2.5 averages {pm25} µg/m³ ({pm25_x_who}× the WHO 2021 annual guideline of 5 µg/m³). Basic filtration in enclosed areas plus tree/hedge barriers to reduce roadside pollution.",
     "500–1,500",
 )
 # Lower-tier PM2.5 rec for the 12–25 µg/m³ range (still 2-5x the WHO 2021
@@ -66,14 +66,14 @@ _rule(
     lambda c, a, f: 10 <= a.get("pm25_avg_ugm3", 0) < 25,
     3, "Air Quality",
     "Add HEPA filters in patient/learning areas",
-    "PM2.5 is 2-5x the WHO 2021 annual guideline (5 µg/m³). Even moderate exposure compounds pediatric respiratory load over years. Affordable HEPA units in the most-occupied rooms is the cheapest intervention with measurable impact.",
+    "PM2.5 averages {pm25} µg/m³ ({pm25_x_who}× the WHO 2021 annual guideline of 5 µg/m³). Even moderate exposure compounds pediatric respiratory load over years. Affordable HEPA units in the most-occupied rooms is the cheapest intervention with measurable impact.",
     "300–800",
 )
 _rule(
     lambda c, a, f: a.get("pm25_avg_ugm3", 0) >= 35 and f["type"] == "school",
     1, "Air Quality",
     "Establish clean-air classrooms + AQ alert protocol",
-    "Children spend 6+ hours daily breathing unsafe air. Designate at least one filtered classroom as a clean-air refuge. Train staff on AQ alert days to keep children indoors.",
+    "Children spend 6+ hours daily breathing air at {pm25} µg/m³ ({pm25_x_who}× WHO guideline). Designate at least one filtered classroom as a clean-air refuge. Train staff on AQ alert days to keep children indoors.",
     "800–2,000",
 )
 
@@ -105,7 +105,7 @@ _rule(
     lambda c, a, f: c.get("longest_dry_run_days", 0) >= 60 and f["type"] in ("clinic", "hospital"),
     2, "Water Security",
     "Add borehole or water purification system",
-    "Clinics require reliable water for hygiene, sterilization, and patient care. A solar-powered borehole or UV purification unit provides drought-resilient supply.",
+    "{dry_days}-day longest dry run this year. Clinics require reliable water for hygiene, sterilization, and patient care. A solar-powered borehole or UV purification unit provides drought-resilient supply.",
     "3,000–8,000",
 )
 
@@ -126,6 +126,27 @@ _rule(
 )
 
 
+def _format_desc(desc: str, climate: Dict, air: Dict) -> str:
+    """Interpolate facility-specific numbers into rec description strings.
+
+    Descriptions use named placeholders ({heat_days}, {pm25}, etc.) so each
+    rec speaks to THIS facility's actual values, not a generic rule
+    threshold. Missing keys fall back to safe defaults so a description
+    without any placeholders still works.
+    """
+    pm25 = air.get("pm25_avg_ugm3", 0) or 0
+    no2 = air.get("no2_avg_ugm3", 0) or 0
+    return desc.format(
+        heat_days=climate.get("heat_index_days", "—"),
+        precip_days=climate.get("heavy_precip_days", "—"),
+        dry_days=climate.get("longest_dry_run_days", "—"),
+        pm25=f"{pm25:.1f}" if pm25 else "—",
+        pm25_x_who=f"{pm25 / 5:.1f}" if pm25 else "—",
+        no2=f"{no2:.1f}" if no2 else "—",
+        pm25_hours=air.get("pm25_exceed_hours_30d", "—"),
+    )
+
+
 def recommend(facility: Dict, climate: Dict, air: Dict, max_recs: int = 3) -> List[Dict]:
     """Return up to `max_recs` recommendations for this facility, ranked by priority."""
     matches = []
@@ -136,7 +157,7 @@ def recommend(facility: Dict, climate: Dict, air: Dict, max_recs: int = 3) -> Li
                     "priority": priority,
                     "category": category,
                     "title": title,
-                    "description": desc,
+                    "description": _format_desc(desc, climate, air),
                     "estimated_cost_usd": cost,
                 })
         except Exception:

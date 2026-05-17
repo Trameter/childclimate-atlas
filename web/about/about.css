@@ -1,0 +1,238 @@
+/* ========================================================================
+   About page — reuses the design tokens from style.css (CSS vars carry
+   across because both files share the same :root scope). Layout is a
+   single readable column rather than the three-pane shell used on the
+   atlas pages.
+   ======================================================================== */
+
+body.is-about {
+  overflow-y: auto;        /* override the atlas's overflow:hidden */
+  background: var(--ink);
+}
+
+.about-wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 48px 24px 64px;
+  min-height: calc(100vh - var(--topbar-h) - var(--footer-h));
+}
+
+.about {
+  color: var(--paper);
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.about-hero {
+  margin-bottom: 56px;
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 32px;
+}
+.about-hero .eyebrow {
+  margin-bottom: 14px;
+}
+.about-hero .eyebrow .mono {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--paper-soft);
+}
+.about-hero h1 {
+  margin: 0 0 14px;
+  font-family: "Inter Tight", Inter, system-ui, sans-serif;
+  font-size: 38px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--paper);
+}
+.about-hero .lede {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--paper-mute);
+  max-width: 620px;
+}
+
+.about-section {
+  margin-bottom: 48px;
+}
+.about-section h2 {
+  margin: 0 0 18px;
+  font-family: "Inter Tight";
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ember);
+}
+.about-section h3 {
+  margin: 32px 0 14px;
+  font-family: "Inter Tight";
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--paper);
+}
+.about-section p {
+  margin: 0 0 16px;
+  color: var(--paper-mute);
+}
+.about-section p strong {
+  color: var(--paper);
+  font-weight: 500;
+}
+.about-section p em { font-style: italic; color: var(--paper); }
+.about-section p.muted {
+  color: var(--paper-soft);
+  font-size: 13px;
+}
+.about-section p.cite {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--paper-mute);
+  padding: 16px;
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+}
+.about-section a {
+  color: var(--ember);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.12s;
+}
+.about-section a:hover { border-bottom-color: var(--ember); }
+
+.about-section ul {
+  margin: 0 0 16px;
+  padding-left: 22px;
+  color: var(--paper-mute);
+}
+.about-section ul li {
+  margin-bottom: 10px;
+}
+.about-section ul li strong { color: var(--paper); font-weight: 500; }
+
+.about-section code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 13px;
+  background: var(--ink-2);
+  padding: 1px 6px;
+  border-radius: 2px;
+  border: 1px solid var(--rule);
+  color: var(--paper);
+}
+
+/* ---------- About tables (weights, sources) ---------- */
+.about-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 20px;
+  font-size: 13px;
+}
+.about-table th,
+.about-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+.about-table th {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--paper-soft);
+  background: transparent;
+  border-bottom: 1px solid var(--paper-soft);
+}
+.about-table td {
+  color: var(--paper-mute);
+}
+.about-table td:first-child {
+  color: var(--paper);
+  font-weight: 500;
+}
+.about-table td.mono {
+  font-family: "JetBrains Mono", monospace;
+  color: var(--ember);
+}
+
+/* ---------- Risk band pills ---------- */
+.band-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 16px;
+}
+.band-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  font-size: 13px;
+  color: var(--paper);
+  background: var(--ink-2);
+}
+.band-pill .sw {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.band-pill.low  .sw { background: var(--low); }
+.band-pill.mid  .sw { background: var(--mod); }
+.band-pill.high .sw { background: var(--high); }
+.band-pill.sev  .sw { background: var(--sev); }
+.band-pill .r {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: var(--paper-soft);
+  margin-left: 4px;
+}
+
+/* ---------- CTA at the bottom ---------- */
+.about-cta {
+  margin-top: 56px;
+  padding-top: 32px;
+  border-top: 1px solid var(--rule);
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.cta-btn {
+  display: inline-block;
+  padding: 12px 22px;
+  background: var(--ember);
+  color: var(--ink);
+  border-radius: 3px;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  letter-spacing: 0.01em;
+  transition: filter 0.12s;
+}
+.cta-btn:hover { filter: brightness(1.10); }
+.cta-link {
+  color: var(--paper-soft);
+  font-size: 13px;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+.cta-link:hover { color: var(--paper); border-bottom-color: var(--paper-soft); }
+
+/* ---------- Mobile ---------- */
+@media (max-width: 720px) {
+  .about-wrap { padding: 32px 18px 48px; }
+  .about-hero h1 { font-size: 28px; }
+  .about-hero .lede { font-size: 15px; }
+  .about { font-size: 14px; }
+  .about-table { font-size: 12px; }
+  .about-table th, .about-table td { padding: 8px 6px; }
+}
