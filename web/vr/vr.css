@@ -423,12 +423,11 @@ body.in-xr .topbar {
   top: 80px;     /* anchored near the top so it doesn't sit on the globe disc */
   left: 50%;
   transform: translateX(-50%);
-  width: 360px;
+  width: 380px;
   max-width: calc(100vw - 32px);
-  padding: 18px 20px 16px;
+  padding: 20px 22px 18px;
   background: rgba(24, 30, 45, 0.96);
   border: 1px solid var(--rule);
-  border-left: 3px solid var(--ember);
   border-radius: 4px;
   color: var(--paper);
   z-index: 15;
@@ -490,4 +489,37 @@ body.in-xr .topbar {
   font-size: 12px;
   color: var(--paper-mute);
   line-height: 1.5;
+}
+
+
+/* ---- Storytelling rec card inside the spotlight popup ---- */
+.vr-spot-popup .vr-spot-rec {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+}
+.vr-spot-popup .vr-spot-rec-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+.vr-spot-popup .vr-spot-rec-pri {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ember);
+}
+.vr-spot-popup .vr-spot-rec-cost {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: var(--paper-mute);
+}
+.vr-spot-popup .vr-spot-rec-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--paper);
 }

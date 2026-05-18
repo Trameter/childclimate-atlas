@@ -938,15 +938,50 @@
     });
   }
 
+  // Build a plain-English driver line for the spotlight popup from the
+  // facility's actual climate + air data. Mirrors the /3d detail panel's
+  // 'Top drivers · plain English' section — same data, same phrasing —
+  // so the user sees the SPECIFIC condition (e.g. '239 days above 35°C
+  // apparent temperature in 2024') instead of the generic key 'heat
+  // exposure'.
+  function plainEnglishDriver(f) {
+    const p = f.properties;
+    const climate = typeof p.climate === "string" ? JSON.parse(p.climate) : (p.climate || {});
+    const air = typeof p.air === "string" ? JSON.parse(p.air) : (p.air || {});
+    const drivers = typeof p.top_drivers === "string" ? JSON.parse(p.top_drivers) : (p.top_drivers || []);
+    const top = drivers[0];
+    if (top === "heat_exposure" && climate.heat_index_days != null) {
+      return `${climate.heat_index_days} days above 35°C apparent temperature.`;
+    }
+    if (top === "air_pollution" && air.pm25_avg_ugm3 != null) {
+      const mult = (air.pm25_avg_ugm3 / 5).toFixed(1);
+      return `PM2.5 averaged ${air.pm25_avg_ugm3} µg/m³ — ${mult}× the WHO 2021 guideline.`;
+    }
+    if (top === "flood_risk" && climate.heavy_precip_days != null) {
+      return `${climate.heavy_precip_days} heavy-precipitation days (≥50 mm) per year.`;
+    }
+    if (top === "drought_risk" && climate.longest_dry_run_days != null) {
+      return `${climate.longest_dry_run_days}-day longest consecutive dry run.`;
+    }
+    if (top === "child_density") {
+      return "Child-population catchment density at or near the country maximum.";
+    }
+    if (top === "facility_fragility") {
+      return "Facility fragility (power / water / structure) flagged from OSM tags.";
+    }
+    return (top || "").replace(/_/g, " ");
+  }
+
   function showSpotPopup(stop) {
     hideSpotPopup();
     const f = stop.feature;
     const p = f.properties;
     const s = p.risk_score || 0;
-    const drivers = typeof p.top_drivers === "string" ? JSON.parse(p.top_drivers) : (p.top_drivers || []);
-    const topDriver = (drivers[0] || "").replace(/_/g, " ");
     const band = RISK_LABELS[bandFor(s)];
     const bandClass = band === "mid" ? "mid" : band;
+    const driverLine = plainEnglishDriver(f);
+    const recs = typeof p.recommendations === "string" ? JSON.parse(p.recommendations) : (p.recommendations || []);
+    const topRec = recs[0];
     const popup = document.createElement("div");
     popup.className = "vr-spot-popup";
     popup.innerHTML = `
@@ -957,7 +992,16 @@
         <span class="vr-spot-score">${s.toFixed(0)}</span>
         <span class="vr-spot-band ${bandClass}">${band === "mid" ? "moderate" : band}</span>
       </div>
-      ${topDriver ? `<div class="vr-spot-driver">Top driver · ${escapeHtml(topDriver)}</div>` : ""}
+      ${driverLine ? `<div class="vr-spot-driver">${escapeHtml(driverLine)}</div>` : ""}
+      ${topRec ? `
+        <div class="vr-spot-rec">
+          <div class="vr-spot-rec-head">
+            <span class="vr-spot-rec-pri">Priority ${String(topRec.priority).padStart(2, "0")} · ${escapeHtml(topRec.category || "")}</span>
+            <span class="vr-spot-rec-cost">$${escapeHtml(topRec.estimated_cost_usd || "")}</span>
+          </div>
+          <div class="vr-spot-rec-title">${escapeHtml(topRec.title || "")}</div>
+        </div>
+      ` : ""}
     `;
     document.body.appendChild(popup);
     tourPopup = popup;
