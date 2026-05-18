@@ -64,10 +64,12 @@
           <span class="vr-enter-label">Enter AR</span>
         </button>
       </div>
-      <!-- Country labels float over the visible hemisphere via DOM overlay.
-           Positions updated per frame from screen-projected 3D vectors. -->
-      <div id="vr-country-labels" aria-hidden="true"></div>
     </div>
+
+    <!-- Country labels float over the visible hemisphere via DOM overlay.
+         Positions updated per frame from screen-projected 3D vectors.
+         Sibling of .vr-hud so it can cover the full viewport. -->
+    <div id="vr-country-labels" aria-hidden="true"></div>
 
     <!-- Top-left HUD: country picker + summary -->
     <div class="vr-meta" id="vr-meta">

@@ -196,6 +196,9 @@
     await loadOneCountry(currentIso);
     setStatus(`${COUNTRY_CENTER[currentIso].name} loaded · ${countryData[currentIso].length.toLocaleString()} facilities`, "ready");
     updateMeta();
+    // Centre the globe on the active country so its beacons face the
+    // camera, instead of defaulting to the prime-meridian default.
+    animateGlobeToCountry(currentIso);
     for (const iso of ISOS) {
       if (iso !== currentIso) loadOneCountry(iso);  // fire-and-forget
     }
