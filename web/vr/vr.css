@@ -400,3 +400,94 @@ body.in-xr .topbar {
   background: rgba(216, 123, 79, 0.10);
 }
 .vr-audio-btn .vr-audio-icon { font-family: serif; font-size: 14px; line-height: 1; }
+
+
+/* ---- Spotlight tour button (primary action; ember filled) ---- */
+.vr-tour-btn {
+  background: var(--ember);
+  color: var(--ink);
+  border: 0;
+  box-shadow: 0 6px 24px rgba(216, 123, 79, 0.32);
+}
+.vr-tour-btn:hover:not(:disabled) { filter: brightness(1.1); }
+.vr-tour-btn.active {
+  background: var(--ink-2);
+  color: var(--ember);
+  border: 1px solid var(--ember);
+  box-shadow: none;
+}
+
+/* ---- Spotlight stop popup (rendered at each tour stop) ---- */
+.vr-spot-popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) translateY(-160px);
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  padding: 18px 20px 16px;
+  background: rgba(24, 30, 45, 0.96);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--ember);
+  border-radius: 4px;
+  color: var(--paper);
+  z-index: 15;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: vr-spot-pop-in 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;  /* tour is auto-driven; clicks pass through */
+}
+@keyframes vr-spot-pop-in {
+  from { opacity: 0; transform: translate(-50%, -50%) translateY(-140px); }
+  to   { opacity: 1; transform: translate(-50%, -50%) translateY(-160px); }
+}
+.vr-spot-popup .vr-spot-stage {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--ember);
+  margin-bottom: 6px;
+}
+.vr-spot-popup .vr-spot-name {
+  font-family: "Inter Tight";
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin-bottom: 4px;
+}
+.vr-spot-popup .vr-spot-loc {
+  font-size: 12px;
+  color: var(--paper-mute);
+  margin-bottom: 14px;
+}
+.vr-spot-popup .vr-spot-score-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.vr-spot-popup .vr-spot-score {
+  font-family: "Inter Tight";
+  font-size: 34px;
+  font-weight: 500;
+  line-height: 1;
+}
+.vr-spot-popup .vr-spot-band {
+  font-family: "JetBrains Mono";
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 2px;
+  border: 1px solid currentColor;
+}
+.vr-spot-popup .vr-spot-band.severe { color: var(--sev); }
+.vr-spot-popup .vr-spot-band.high   { color: var(--high); }
+.vr-spot-popup .vr-spot-band.mid    { color: var(--mod); }
+.vr-spot-popup .vr-spot-driver {
+  font-size: 12px;
+  color: var(--paper-mute);
+  line-height: 1.5;
+}

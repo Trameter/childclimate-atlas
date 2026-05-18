@@ -832,6 +832,167 @@
   // ---------------------------------------------------------------------
   // Init
   // ---------------------------------------------------------------------
+  // ---------------------------------------------------------------------
+  // Spotlight tour — auto-cycle through the worst facilities across all
+  // three countries. The camera/user stays put (comfortable for VR);
+  // each stop rotates the globe to centre that facility, pops a panel
+  // with name + score + top driver, dwells, then advances.
+  // ---------------------------------------------------------------------
+  let tourActive = false;
+  let tourIdx = 0;
+  let tourQueue = [];
+  let tourTimer = null;
+  let tourPopup = null;
+
+  const TOUR_STOPS_PER_COUNTRY = 3;
+  const TOUR_DWELL_MS = 5500;          // time the popup is up at each stop
+  const TOUR_TRAVEL_MS = 1300;         // globe-rotation time to reach the stop
+  const TOUR_OUTRO_MS = 3000;          // time to settle back to default view after
+
+  function buildTourQueue() {
+    // Take the top N severe facilities from each country, interleave so
+    // the tour bounces between countries instead of dwelling on one.
+    const perCountry = {};
+    for (const iso of ISOS) {
+      const feats = countryData[iso] || [];
+      const sorted = [...feats].sort((a, b) =>
+        (b.properties.risk_score || 0) - (a.properties.risk_score || 0)
+      );
+      perCountry[iso] = sorted.slice(0, TOUR_STOPS_PER_COUNTRY);
+    }
+    // Interleave: BGD-NGA-GTM round-robin. BGD first because its severe
+    // band is best-populated, sets the bar high for the rest.
+    const order = ["BGD", "NGA", "GTM"];
+    const stops = [];
+    for (let i = 0; i < TOUR_STOPS_PER_COUNTRY; i++) {
+      for (const iso of order) {
+        const list = perCountry[iso];
+        if (list && list[i]) stops.push({ iso, feature: list[i] });
+      }
+    }
+    return stops;
+  }
+
+  // Rotate the globe to put a specific facility (not just a country
+  // centre) at the camera's view-centre. Same quaternion math as
+  // animateGlobeToCountry, parameterised by an arbitrary lat/lng.
+  function animateGlobeToFeature(lat, lng, durationMs) {
+    const featureNaturalPos = latLngToVec3(lat, lng, 1).normalize();
+    const cameraWorld = camera.getWorldPosition(new THREE.Vector3());
+    const globeWorld = globeGroup.getWorldPosition(new THREE.Vector3());
+    const viewCenter = cameraWorld.clone().sub(globeWorld).normalize();
+    const center = new THREE.Quaternion().setFromUnitVectors(featureNaturalPos, viewCenter);
+    const axialTilt = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 0, 1), THREE.MathUtils.degToRad(23.4)
+    );
+    const finalQuaternion = new THREE.Quaternion().multiplyQuaternions(axialTilt, center);
+    const startQuaternion = globeGroup.quaternion.clone();
+    const start = performance.now();
+    return new Promise(resolve => {
+      function frame(now) {
+        const t = Math.min((now - start) / durationMs, 1);
+        const eased = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3)/2;
+        const slerped = new THREE.Quaternion().slerpQuaternions(startQuaternion, finalQuaternion, eased);
+        globeGroup.setRotationFromQuaternion(slerped);
+        lastInteract = performance.now();
+        if (t < 1) requestAnimationFrame(frame);
+        else resolve();
+      }
+      requestAnimationFrame(frame);
+    });
+  }
+
+  function showSpotPopup(stop) {
+    hideSpotPopup();
+    const f = stop.feature;
+    const p = f.properties;
+    const s = p.risk_score || 0;
+    const drivers = typeof p.top_drivers === "string" ? JSON.parse(p.top_drivers) : (p.top_drivers || []);
+    const topDriver = (drivers[0] || "").replace(/_/g, " ");
+    const band = RISK_LABELS[bandFor(s)];
+    const bandClass = band === "mid" ? "mid" : band;
+    const popup = document.createElement("div");
+    popup.className = "vr-spot-popup";
+    popup.innerHTML = `
+      <div class="vr-spot-stage">Stop ${tourIdx + 1} of ${tourQueue.length} · ${COUNTRY_CENTER[stop.iso].name}</div>
+      <div class="vr-spot-name">${escapeHtml(p.name || "Unnamed facility")}</div>
+      <div class="vr-spot-loc">${escapeHtml(p.facility_type || "")} · ${f.geometry.coordinates[1].toFixed(2)}°, ${f.geometry.coordinates[0].toFixed(2)}°</div>
+      <div class="vr-spot-score-row">
+        <span class="vr-spot-score">${s.toFixed(0)}</span>
+        <span class="vr-spot-band ${bandClass}">${band === "mid" ? "moderate" : band}</span>
+      </div>
+      ${topDriver ? `<div class="vr-spot-driver">Top driver · ${escapeHtml(topDriver)}</div>` : ""}
+    `;
+    document.body.appendChild(popup);
+    tourPopup = popup;
+  }
+  function hideSpotPopup() {
+    if (tourPopup) { tourPopup.remove(); tourPopup = null; }
+  }
+
+  async function visitNextTourStop() {
+    if (!tourActive) return;
+    if (tourIdx >= tourQueue.length) { finishTour(); return; }
+    const stop = tourQueue[tourIdx];
+    // Switch active country if needed (so the active-emphasis pulls in
+    // the right beacon group's opacity).
+    if (stop.iso !== currentIso) {
+      currentIso = stop.iso;
+      document.querySelectorAll(".vr-country").forEach(b => {
+        b.classList.toggle("active", b.dataset.iso === stop.iso);
+      });
+      applyCountryOpacities();
+      updateMeta();
+    }
+    const [lng, lat] = stop.feature.geometry.coordinates;
+    await animateGlobeToFeature(lat, lng, TOUR_TRAVEL_MS);
+    if (!tourActive) return;
+    showSpotPopup(stop);
+    tourTimer = setTimeout(() => {
+      tourIdx++;
+      visitNextTourStop();
+    }, TOUR_DWELL_MS);
+  }
+
+  function startTour() {
+    if (tourActive) { stopTour(); return; }
+    tourQueue = buildTourQueue();
+    if (!tourQueue.length) {
+      setStatus("No facilities loaded yet", "unavailable");
+      return;
+    }
+    tourActive = true;
+    tourIdx = 0;
+    $("vr-tour-btn").classList.add("active");
+    $("vr-tour-btn").querySelector(".vr-tour-btn .vr-enter-label, .vr-enter-label").textContent = "Stop tour";
+    $("vr-tour-btn").querySelector(".vr-enter-icon").textContent = "■";
+    visitNextTourStop();
+  }
+
+  function stopTour() {
+    tourActive = false;
+    tourIdx = 0;
+    tourQueue = [];
+    if (tourTimer) { clearTimeout(tourTimer); tourTimer = null; }
+    hideSpotPopup();
+    $("vr-tour-btn").classList.remove("active");
+    $("vr-tour-btn").querySelector(".vr-enter-label").textContent = "Spotlight tour";
+    $("vr-tour-btn").querySelector(".vr-enter-icon").textContent = "▶";
+  }
+
+  function finishTour() {
+    // Settle back to the previously-active country's centre.
+    tourActive = false;
+    hideSpotPopup();
+    animateGlobeToCountry(currentIso);
+    if (tourTimer) { clearTimeout(tourTimer); tourTimer = null; }
+    $("vr-tour-btn").classList.remove("active");
+    $("vr-tour-btn").querySelector(".vr-enter-label").textContent = "Spotlight tour";
+    $("vr-tour-btn").querySelector(".vr-enter-icon").textContent = "▶";
+  }
+
+  $("vr-tour-btn")?.addEventListener("click", startTour);
+
   setupXrButton();
   init();
 })();
