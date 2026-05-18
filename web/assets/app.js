@@ -1048,6 +1048,10 @@ function wireViewToggle() {
       // Allow modifier-key opens (cmd+click etc.) to behave normally.
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
       const href = btn.getAttribute("href");
+      // Only intercept the 2D/3D in-place toggle. Other targets in the
+      // toggle group (e.g. /vr) are separate pages — let the browser do
+      // a normal navigation instead of hijacking the click.
+      if (href !== "/" && href !== "/3d") return;
       const want3D = href === "/3d";
       if (want3D === IS_3D) { e.preventDefault(); return; }
       e.preventDefault();
