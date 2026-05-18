@@ -472,18 +472,38 @@
   }
 
   // --- VR controller pointer + trigger pick ---
-  const controllerPointerMat = new THREE.LineBasicMaterial({
-    color: 0xD87B4F, transparent: true, opacity: 0.85,
+  //
+  // Originally rendered the beam as THREE.Line. WebGL ignores linewidth
+  // (always 1px) so the beam was invisible in VR. Replaced with a thin
+  // CylinderGeometry so the beam has actual thickness, plus small
+  // spheres at the controller origin (so the user can see where the
+  // controller IS in space) and at the beam tip (so they can see WHERE
+  // the beam is pointing).
+  const POINTER_LENGTH = 3;          // 3m beam — comfortably reaches the globe
+  const POINTER_RADIUS = 0.006;      // thin but visible
+  const pointerGeom = new THREE.CylinderGeometry(POINTER_RADIUS, POINTER_RADIUS, POINTER_LENGTH, 8);
+  // Cylinder default axis is +Y; we want the beam to point along -Z (the
+  // controller's forward direction). Rotate -90° around X, then translate
+  // so the cylinder STARTS at the origin (instead of being centred there).
+  pointerGeom.rotateX(-Math.PI / 2);
+  pointerGeom.translate(0, 0, -POINTER_LENGTH / 2);
+  const pointerMat = new THREE.MeshBasicMaterial({
+    color: 0xD87B4F, transparent: true, opacity: 0.65,
   });
-  const controllerPointerGeom = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0, -2),
-  ]);
+  const originGeom = new THREE.SphereGeometry(0.018, 16, 12);
+  const originMat = new THREE.MeshBasicMaterial({ color: 0xD87B4F });
+  const tipGeom = new THREE.SphereGeometry(0.014, 16, 12);
+  const tipMat = new THREE.MeshBasicMaterial({ color: 0xFAF8F4 });
   function attachController(idx) {
     const c = renderer.xr.getController(idx);
-    const line = new THREE.Line(controllerPointerGeom.clone(), controllerPointerMat.clone());
-    line.scale.z = 2;
-    c.add(line);
+    // Origin marker — shows where the controller physically is
+    c.add(new THREE.Mesh(originGeom.clone(), originMat.clone()));
+    // Beam pointing forward
+    c.add(new THREE.Mesh(pointerGeom.clone(), pointerMat.clone()));
+    // Tip dot at end of beam — shows what you're aiming at
+    const tip = new THREE.Mesh(tipGeom.clone(), tipMat.clone());
+    tip.position.set(0, 0, -POINTER_LENGTH);
+    c.add(tip);
     c.addEventListener("select", () => xrPick(c));
     scene.add(c);
     return c;
