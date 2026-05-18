@@ -1916,6 +1916,16 @@ function renderDetail(feature) {
       </div>
     </div>
 
+    <!-- Satellite imagery from ESRI World_Imagery REST endpoint, centred
+         on the facility's lat/lng with ~600m padding. Loads on demand on
+         each detail open; onerror hides the block so a missing tile
+         doesn't leave a broken-image placeholder. -->
+    <div class="detail-satellite" id="detail-satellite">
+      <img id="detail-satellite-img" alt="Satellite view of the facility's location" />
+      <div class="detail-satellite-pin" aria-hidden="true"></div>
+      <div class="detail-satellite-attr mono">Satellite · Esri / Maxar</div>
+    </div>
+
     <!-- Micro-scene: a small Three.js vignette that procedurally visualises
          the facility's dominant climate stressor (heat / drought / flood /
          PM2.5). Built by MicroScene.create() right after this innerHTML
@@ -1952,6 +1962,25 @@ function renderDetail(feature) {
   document.querySelector(".detail-wrap")?.setAttribute("aria-hidden", "false");
   // Trigger map resize so MapLibre recalculates center/zoom for the narrower canvas
   setTimeout(() => map.resize(), 260);
+
+  // Wire the satellite thumbnail. ESRI World_Imagery REST endpoint —
+  // no API key, free for non-commercial / prototype use, attribution
+  // baked into the .detail-satellite-attr caption. ±0.003° bbox ≈ ±330m
+  // at the equator, which gives a comfortable neighbourhood-scale view
+  // with the facility roughly centred. onerror hides the block.
+  (function setupSatellite() {
+    const wrap = document.getElementById("detail-satellite");
+    const img  = document.getElementById("detail-satellite-img");
+    if (!wrap || !img) return;
+    const lng = feature.geometry.coordinates[0];
+    const lat = feature.geometry.coordinates[1];
+    const PAD = 0.003;
+    const w = lng - PAD, e = lng + PAD;
+    const s = lat - PAD, n = lat + PAD;
+    const url = `https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export?bbox=${w},${s},${e},${n}&size=480,240&format=jpg&bboxSR=4326&imageSR=3857&f=image`;
+    img.onerror = () => { wrap.style.display = "none"; };
+    img.src = url;
+  })();
 
   // Spin up the micro-scene now that the canvas is in the DOM with its
   // final dimensions. Guarded for the case where the global isn't loaded
