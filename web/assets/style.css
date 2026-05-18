@@ -1635,3 +1635,43 @@ body.mobile-menu-open .mobile-menu-btn .mm-bars::after  { top: 0; transform: rot
   /* Footer: tighter, smaller type — already wraps at 1100px. */
   footer { gap: 8px; padding: 8px 14px; font-size: 11px; }
 }
+
+
+/* ---- HUD year-projection chip row ----
+   Sits below the country + hazards HUD chips. Clicking 2030 or 2050
+   re-weights the hazard heatmaps with IPCC SSP2-4.5 projection
+   multipliers (visualises 'what will the hot zones look like by Y?').
+   ---- */
+.hud-year-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 5px 12px;
+}
+.hud-year-row .hud-year-label {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--paper-soft);
+  margin-right: 6px;
+}
+.year-chip {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--paper-mute);
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.year-chip:hover { color: var(--paper); border-color: var(--paper-soft); }
+.year-chip.active {
+  color: var(--ink);
+  background: var(--ember);
+  border-color: var(--ember);
+  font-weight: 600;
+}

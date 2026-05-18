@@ -2700,9 +2700,22 @@ let heatmapVisible = false;
 //   max       — the value at which weight saturates to 1.0
 //   color     — the gradient stops [opacity, color] from low to high density
 //   radius    — px per density unit at zoom 14 (smaller = tighter clusters)
+// Year projection multipliers — approximate IPCC SSP2-4.5 (middle-of-the-
+// road) scaling factors vs 2024 baseline. Used to visualise what current
+// hazard hotspots will intensify into. Not a downscaled climate model,
+// just defensible regional approximations; the about/methodology page
+// notes this.
+const YEAR_MULTIPLIERS = {
+  2024: { heat: 1.00, drought: 1.00, flood: 1.00, pm25: 1.00 },
+  2030: { heat: 1.15, drought: 1.10, flood: 1.05, pm25: 1.00 },
+  2050: { heat: 1.40, drought: 1.25, flood: 1.15, pm25: 1.00 },
+};
+let currentProjectionYear = 2024;
+
 const HAZARD_LAYERS = [
   {
     id: "haz-heat",
+    key: "heat",
     prop: "heat_index_days",
     max: 240,
     radiusZ14: 36,
@@ -2717,6 +2730,7 @@ const HAZARD_LAYERS = [
   },
   {
     id: "haz-drought",
+    key: "drought",
     prop: "longest_dry_run_days",
     max: 90,
     radiusZ14: 28,
@@ -2730,6 +2744,7 @@ const HAZARD_LAYERS = [
   },
   {
     id: "haz-flood",
+    key: "flood",
     prop: "heavy_precip_days",
     max: 30,
     radiusZ14: 24,
@@ -2743,6 +2758,7 @@ const HAZARD_LAYERS = [
   },
   {
     id: "haz-pm25",
+    key: "pm25",
     prop: "pm25_avg_ugm3",
     max: 50,
     radiusZ14: 26,
@@ -2815,12 +2831,13 @@ function toggleHeatmap() {
   const hud = document.getElementById("hud-heatmap");
   if (heatmapVisible) {
     ensureHazardLayers();
+    updateHazardWeights();
     for (const h of HAZARD_LAYERS) {
       if (map.getLayer(h.id)) map.setLayoutProperty(h.id, "visibility", "visible");
     }
     setFacilityLayersVisible(false);
     btn?.classList.add("active");
-    if (hud) hud.textContent = "Hazards · on";
+    if (hud) hud.textContent = `Hazards · on (${currentProjectionYear})`;
     if (btn) btn.textContent = "Hide hazards";
   } else {
     for (const h of HAZARD_LAYERS) {
@@ -2830,6 +2847,40 @@ function toggleHeatmap() {
     btn?.classList.remove("active");
     if (hud) hud.textContent = "Hazards · off";
     if (btn) btn.textContent = "Hazards";
+  }
+}
+
+// Re-render the hazard heatmap weight expressions using the current year's
+// projection multiplier. Divides the saturation max by the multiplier so
+// the same raw climate value contributes proportionally MORE — visually
+// the hazard zones expand and brighten as the user steps forward in time.
+function updateHazardWeights() {
+  const m = YEAR_MULTIPLIERS[currentProjectionYear] || YEAR_MULTIPLIERS[2024];
+  for (const h of HAZARD_LAYERS) {
+    if (!map.getLayer(h.id)) continue;
+    const mult = (m[h.key] || 1);
+    const projectedMax = h.max / mult;  // smaller max = same value reaches density 1 sooner
+    map.setPaintProperty(h.id, "heatmap-weight", [
+      "interpolate", ["linear"],
+      ["coalesce", ["get", h.prop], 0],
+      0, 0, projectedMax, 1,
+    ]);
+  }
+}
+
+function setProjectionYear(year) {
+  currentProjectionYear = year;
+  document.querySelectorAll(".year-chip").forEach(el => {
+    el.classList.toggle("active", parseInt(el.dataset.year, 10) === year);
+  });
+  // Auto-enable hazards when stepping into a future year — the projection
+  // is meaningless visually without the overlays on.
+  if (year !== 2024 && !heatmapVisible) {
+    toggleHeatmap();
+  } else if (heatmapVisible) {
+    updateHazardWeights();
+    const hud = document.getElementById("hud-heatmap");
+    if (hud) hud.textContent = `Hazards · on (${year})`;
   }
 }
 
@@ -2907,6 +2958,9 @@ function printSummary() {
 document.addEventListener("DOMContentLoaded", () => {
   const heatBtn = document.getElementById("btn-heatmap");
   if (heatBtn) heatBtn.addEventListener("click", toggleHeatmap);
+  document.querySelectorAll(".year-chip").forEach(el => {
+    el.addEventListener("click", () => setProjectionYear(parseInt(el.dataset.year, 10)));
+  });
   const printBtn = document.getElementById("btn-print");
   if (printBtn) printBtn.addEventListener("click", printSummary);
 });
