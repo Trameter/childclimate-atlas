@@ -153,6 +153,63 @@ let allFeatures = [];
 let filteredFeatures = [];
 let activeFilters = { types: new Set(["clinic", "hospital", "school"]), bands: new Set(["low", "mid", "high", "severe"]), search: "", state: "", searchType: "" };
 
+// --- Multi-country mode (3D only) ---
+// On /3d we load ALL three countries and show them simultaneously so the
+// global pattern is visible at once. The ACTIVE country renders at full
+// opacity; the other two dim to 30%. State + search filters only apply
+// to the active country (other countries stay visible as context).
+//
+// On /2d we keep the single-country flow to avoid scattering dots across
+// the world on a flat map (visually meaningless).
+const ALL_ISOS = ["NGA", "BGD", "GTM"];
+const countryDataByIso = {};   // iso -> raw geojson data
+let allCountriesLoaded = false;
+
+function tagFeaturesIso(features, iso) {
+  for (const f of features) { f.properties._iso3 = iso; }
+  return features;
+}
+
+// Re-build allFeatures from every cached country (in 3D mode). Used after
+// background country loads land so they get merged into the active view.
+function mergeAllCountriesIntoAllFeatures() {
+  const combined = [];
+  for (const iso of ALL_ISOS) {
+    const data = countryDataByIso[iso];
+    if (!data) continue;
+    combined.push(...tagFeaturesIso(data.features || [], iso));
+  }
+  allFeatures = combined;
+}
+
+// Paint expression for "1.0 for active, 0.3 for context" on a circle layer's
+// opacity. Rebuilt + reapplied whenever the active country changes.
+function buildActiveOpacityExpr(activeIso, baseOpacity) {
+  return ["case",
+    ["==", ["get", "_iso3"], activeIso], baseOpacity,
+    baseOpacity * 0.30,
+  ];
+}
+function applyActiveCountryOpacity(activeIso) {
+  // Only in 3D — in 2D we have a single country loaded so opacity stays
+  // at the base values.
+  if (!IS_3D) return;
+  const map_ = window.map;
+  if (!map_) return;
+  // Per-layer base opacity (matches the values defined when each layer
+  // was added in updateMap).
+  const bases = {
+    "facilities-glow":   0.50,
+    "facilities":        1.00,
+    "facilities-hovered":0.95,
+    "selected-ring":     1.00,
+  };
+  for (const [layerId, base] of Object.entries(bases)) {
+    if (!map_.getLayer(layerId)) continue;
+    map_.setPaintProperty(layerId, "circle-opacity", buildActiveOpacityExpr(activeIso, base));
+  }
+}
+
 // ---- data loading ----
 // In-memory cache + browser HTTP cache + background prefetch.
 // Also: stream the response body so the user sees live progress instead of
@@ -1283,9 +1340,16 @@ function applyFilters() {
     const p = f.properties;
     if (!activeFilters.types.has(p.facility_type)) return false;
     if (!activeFilters.bands.has(band(p.risk_score))) return false;
-    if (activeFilters.state && getState(f) !== activeFilters.state) return false;
-    const dname = displayName(f).toLowerCase();
-    if (s && !dname.includes(s)) return false;
+    // State + search filters only apply to the ACTIVE country in 3D
+    // multi-country mode. Other countries stay visible as dimmed context
+    // so the global pattern is preserved. In 2D mode everything is the
+    // active country (we only load one) so these always apply.
+    const isActive = !IS_3D || p._iso3 === _currentCountryIso || !p._iso3;
+    if (isActive) {
+      if (activeFilters.state && getState(f) !== activeFilters.state) return false;
+      const dname = displayName(f).toLowerCase();
+      if (s && !dname.includes(s)) return false;
+    }
     return true;
   });
   // The spotlight reel is derived from filteredFeatures, so a filter change
@@ -1356,6 +1420,8 @@ function updateMap() {
     // re-adding any layers — the aura source already exists, only its color
     // + center need updating.
     setCountryAura(_currentCountryIso);
+    // Multi-country: keep paint opacity in sync with the active country.
+    applyActiveCountryOpacity(_currentCountryIso);
     return;
   }
 
@@ -1367,6 +1433,11 @@ function updateMap() {
     75, "#C35248"]; // severe
 
   map.addSource("facilities", { type: "geojson", data: geojson });
+  // Note on opacity below: each layer paints with a static base value, but
+  // immediately after addLayer we call applyActiveCountryOpacity() which
+  // replaces it with a case-expression so non-active countries dim to 30%
+  // in 3D mode. In 2D mode allActiveCountryOpacity is a no-op and the
+  // base values stick.
   map.addLayer({
     id: "facilities-glow", type: "circle", source: "facilities",
     paint: {
@@ -1464,6 +1535,9 @@ function updateMap() {
   // Initial population for the very first load — subsequent country switches
   // hit the updateMap early-return branch which calls setCountryAura there.
   setCountryAura(_currentCountryIso);
+  // Multi-country mode: apply active-country opacity case expressions now
+  // that the layers exist (no-op in 2D).
+  applyActiveCountryOpacity(_currentCountryIso);
 
   // Country-trail — a glowing great-circle line on the globe drawn between
   // the previous country's center and the new country's center whenever
@@ -2355,7 +2429,16 @@ async function switchCountry(iso3) {
   // when both render at the same instant, but that beats waiting.
   const data = await loadAtlas(iso3, { showProgress: true });
   currentData = data;
-  allFeatures = data.features || [];
+  // In 3D mode, tag this country's features with _iso3 and cache them.
+  // Other countries stream in as background loads via loadOtherCountries()
+  // below — by the time the user notices, all three are visible.
+  countryDataByIso[iso3] = data;
+  tagFeaturesIso(data.features || [], iso3);
+  if (IS_3D) {
+    mergeAllCountriesIntoAllFeatures();
+  } else {
+    allFeatures = data.features || [];
+  }
 
   // --- 3. RE-RENDER with real data ---------------------------------------
   populateStates(allFeatures);
@@ -2396,6 +2479,35 @@ async function switchCountry(iso3) {
     pendingSpotlightStart = false;
     setTimeout(() => startSpotlight(), 500);
   }
+
+  // Multi-country (3D only): kick off background loads of the OTHER
+  // countries so they fade in as dimmed context. The active country is
+  // already painted; this just streams in the rest of the world.
+  if (IS_3D && !allCountriesLoaded) {
+    loadOtherCountries(iso3);
+  }
+}
+
+// Load every non-active country (cached on hit) and merge their features
+// into allFeatures + re-render. Each landing triggers a single applyFilters
+// pass so the new dots fade in (well, snap in — fade is a polish layer for
+// another session). Fire-and-forget: errors logged, not thrown, so a slow
+// connection doesn't block the active country.
+async function loadOtherCountries(activeIso) {
+  for (const iso of ALL_ISOS) {
+    if (iso === activeIso) continue;
+    if (countryDataByIso[iso]) continue;
+    try {
+      const data = await loadAtlas(iso, { showProgress: false });
+      countryDataByIso[iso] = data;
+      tagFeaturesIso(data.features || [], iso);
+      mergeAllCountriesIntoAllFeatures();
+      applyFilters();
+    } catch (e) {
+      console.warn(`[atlas] background load failed for ${iso}:`, e);
+    }
+  }
+  allCountriesLoaded = true;
 
   // --- 4. BACKGROUND PREFETCH (first load only) --------------------------
   // Warm the cache so switching to the other two countries is instant.
