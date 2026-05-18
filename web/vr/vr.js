@@ -152,6 +152,41 @@
   }
   globeGroup.add(buildGraticule());
 
+  // --- Country borders ---
+  // Natural Earth 1:50m outlines for NGA / BGD / GTM, vendored via
+  // borders.js (loaded before this script). Each country's outer ring(s)
+  // are rendered as a glowing LineLoop on the globe surface, in the
+  // country's aura colour. Subtle (low opacity) so they orient the
+  // viewer without competing with beacons for attention.
+  const BORDER_COLOR_BY_ISO = {
+    NGA: 0xD87B4F,   // ember
+    BGD: 0x5FA5C7,   // cool cyan
+    GTM: 0xD9A655,   // amber
+  };
+  function buildCountryBorders() {
+    const data = (typeof window !== "undefined") ? window.COUNTRY_BORDERS : null;
+    if (!data) return;
+    for (const iso of ISOS) {
+      const rings = data[iso];
+      if (!rings) continue;
+      const color = BORDER_COLOR_BY_ISO[iso] || 0xD87B4F;
+      for (const ring of rings) {
+        // Convert each [lng, lat] ring point to a Vec3 on the sphere
+        // surface (slightly above the surface so the line isn't z-fighting
+        // with the globe mesh).
+        const pts = ring.map(([lng, lat]) => latLngToVec3(lat, lng, GLOBE_RADIUS * 1.003));
+        // Close the loop if it isn't already.
+        if (pts.length > 0 && !pts[0].equals(pts[pts.length-1])) pts.push(pts[0].clone());
+        const geom = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat = new THREE.LineBasicMaterial({
+          color, transparent: true, opacity: 0.55,
+        });
+        globeGroup.add(new THREE.Line(geom, mat));
+      }
+    }
+  }
+  buildCountryBorders();
+
   // --- Per-country beacon groups (loaded in parallel on startup) ---
   // Each country gets its own Group containing beacons + severe rings.
   // The Group's children's materials carry a `currentOpacity` we tween
