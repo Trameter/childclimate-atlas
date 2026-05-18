@@ -158,13 +158,18 @@
   // ---------------------------------------------------------------------
   // Lat/lng → globe-surface vector
   // ---------------------------------------------------------------------
+  // Standard right-handed cartographic convention: Greenwich (lng 0) sits
+  // at +Z (facing the camera by default), east is +X (to the right), north
+  // is +Y (up). Previous formula had east/west mirrored — Nigeria appeared
+  // to the EAST of Bangladesh on the globe when it's actually west.
   function latLngToVec3(lat, lng, radius = GLOBE_RADIUS) {
-    const phi = (90 - lat) * Math.PI / 180;
-    const theta = (lng + 180) * Math.PI / 180;
+    const latRad = lat * Math.PI / 180;
+    const lngRad = lng * Math.PI / 180;
+    const cosLat = Math.cos(latRad);
     return new THREE.Vector3(
-      -radius * Math.sin(phi) * Math.cos(theta),
-       radius * Math.cos(phi),
-       radius * Math.sin(phi) * Math.sin(theta),
+      radius * cosLat * Math.sin(lngRad),   // X — east is +X
+      radius * Math.sin(latRad),             // Y — north is +Y
+      radius * cosLat * Math.cos(lngRad),   // Z — Greenwich is +Z
     );
   }
 
