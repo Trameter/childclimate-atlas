@@ -502,6 +502,10 @@
       xrSessionType = sessionType;
       document.body.classList.add("in-xr");
       document.body.classList.toggle("in-xr-ar", sessionType === "immersive-ar");
+      // Force-hide any DOM tooltip/detail overlays that were visible
+      // pre-session, so they don't leak through the immersive view.
+      tooltip.hidden = true;
+      $("vr-detail").hidden = true;
       await renderer.xr.setSession(xrSession);
       controllers = [attachController(0), attachController(1)];
       if (sessionType === "immersive-ar") scene.background = null;
@@ -643,6 +647,14 @@
     return arr;
   }
   function updateHover(clientX, clientY) {
+    // In an active XR session the desktop tooltip just leaks through as
+    // a stuck DOM overlay (the emulator composites DOM on top of the
+    // canvas). Skip entirely so it can't show, and force-hide in case
+    // it was visible when the user clicked Enter VR.
+    if (xrSession) {
+      tooltip.hidden = true;
+      return;
+    }
     const rect = canvas.getBoundingClientRect();
     pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
@@ -666,6 +678,9 @@
   canvas.addEventListener("mouseleave", () => { tooltip.hidden = true; });
 
   canvas.addEventListener("click", (e) => {
+    // In an XR session, mouse clicks don't make sense (user is in the
+    // headset). All beacon-picking goes through the controller trigger.
+    if (xrSession) return;
     const rect = canvas.getBoundingClientRect();
     pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
