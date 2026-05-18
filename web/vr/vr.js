@@ -318,22 +318,43 @@
     setStatus(`${COUNTRY_CENTER[iso].name} · ${(countryData[iso]?.length || 0).toLocaleString()} facilities`, "ready");
   }
 
+  // Quaternion-based globe centering. The previous Euler-angle version had
+  // the wrong pitch sign + an arbitrary 0.5 factor, so the country ended
+  // up on the LOWER hemisphere of the visible disc instead of dead center.
+  // Quaternion math (Quaternion.setFromUnitVectors) handles this exactly:
+  // it computes the single rotation that brings the country's natural
+  // lat/lng position vector to the camera-to-globe-center direction (the
+  // visually-centered point on the globe disc), and we slerp toward it.
   function animateGlobeToCountry(iso) {
     const c = COUNTRY_CENTER[iso];
-    // Targets so that the country centre faces the camera (+Z).
-    const targetYaw = -c.lng * Math.PI / 180;
-    const targetPitch = c.lat * Math.PI / 180 * 0.5;
 
-    const startYaw = globeGroup.rotation.y;
-    const startPitch = globeGroup.rotation.x;
+    // The country's natural position on a unit sphere (no rotation applied).
+    const countryNaturalPos = latLngToVec3(c.lat, c.lng, 1).normalize();
+
+    // The point on the globe surface that visually sits at the center of
+    // the disc (closest point to the camera). This is what we want the
+    // country to align with after rotation.
+    const cameraWorld = camera.getWorldPosition(new THREE.Vector3());
+    const globeWorld = globeGroup.getWorldPosition(new THREE.Vector3());
+    const viewCenter = cameraWorld.clone().sub(globeWorld).normalize();
+
+    // Rotation that takes countryNaturalPos to viewCenter, then compose
+    // with the axial-tilt so the globe keeps its decorative 23.4° lean.
+    const center = new THREE.Quaternion().setFromUnitVectors(countryNaturalPos, viewCenter);
+    const axialTilt = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 0, 1), THREE.MathUtils.degToRad(23.4)
+    );
+    const finalQuaternion = new THREE.Quaternion().multiplyQuaternions(axialTilt, center);
+
+    const startQuaternion = globeGroup.quaternion.clone();
     const start = performance.now();
     const DURATION = 1100;
 
     function frame(now) {
       const t = Math.min((now - start) / DURATION, 1);
       const eased = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3)/2;
-      globeGroup.rotation.y = startYaw + (targetYaw - startYaw) * eased;
-      globeGroup.rotation.x = startPitch + (targetPitch - startPitch) * eased;
+      const slerped = new THREE.Quaternion().slerpQuaternions(startQuaternion, finalQuaternion, eased);
+      globeGroup.setRotationFromQuaternion(slerped);
       lastInteract = performance.now();  // suppress auto-rotate during animation
       if (t < 1) requestAnimationFrame(frame);
     }

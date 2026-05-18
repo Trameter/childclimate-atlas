@@ -344,6 +344,10 @@ body.in-xr .topbar {
 }
 .vr-country-label {
   position: absolute;
+  /* Don't intercept mouse events — otherwise hovering a label kills the
+     canvas's beacon-hover updates and the tooltip gets stuck on the
+     last beacon. pointer-events doesn't inherit from the container. */
+  pointer-events: none;
   font-family: "JetBrains Mono", monospace;
   font-size: 10px;
   font-weight: 600;
