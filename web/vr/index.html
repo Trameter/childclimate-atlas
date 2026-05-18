@@ -54,10 +54,19 @@
         <span class="vr-status-dot"></span>
         <span class="vr-status-text">Loading the atlas…</span>
       </div>
-      <button type="button" class="vr-enter-btn" id="vr-enter-btn" disabled>
-        <span class="vr-enter-icon" aria-hidden="true">⌐</span>
-        <span class="vr-enter-label">Enter VR</span>
-      </button>
+      <div class="vr-enter-row">
+        <button type="button" class="vr-enter-btn" id="vr-enter-btn" disabled>
+          <span class="vr-enter-icon" aria-hidden="true">⌐</span>
+          <span class="vr-enter-label">Enter VR</span>
+        </button>
+        <button type="button" class="vr-enter-btn vr-ar-btn" id="vr-ar-btn" disabled>
+          <span class="vr-enter-icon" aria-hidden="true">◇</span>
+          <span class="vr-enter-label">Enter AR</span>
+        </button>
+      </div>
+      <!-- Country labels float over the visible hemisphere via DOM overlay.
+           Positions updated per frame from screen-projected 3D vectors. -->
+      <div id="vr-country-labels" aria-hidden="true"></div>
     </div>
 
     <!-- Top-left HUD: country picker + summary -->

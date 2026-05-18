@@ -310,3 +310,61 @@ body.in-xr .topbar {
   font-weight: 600;
   letter-spacing: 0.04em;
 }
+
+
+/* ---- Side-by-side VR/AR button row ---- */
+.vr-enter-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  pointer-events: auto;
+}
+.vr-ar-btn {
+  background: var(--ink-2);
+  color: var(--paper);
+  border: 1px solid var(--ember);
+  box-shadow: none;
+}
+.vr-ar-btn:hover:not(:disabled) {
+  background: var(--ember);
+  color: var(--ink);
+}
+.vr-ar-btn:disabled {
+  background: var(--ink-2);
+  color: var(--paper-soft);
+  border-color: var(--rule);
+}
+
+/* ---- Country labels (DOM overlay, screen-projected) ---- */
+#vr-country-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+.vr-country-label {
+  position: absolute;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--paper);
+  padding: 4px 9px;
+  background: rgba(20, 25, 38, 0.78);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+  transition: opacity 200ms ease-out;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+.vr-country-label.active {
+  color: var(--ember);
+  border-color: var(--ember);
+}
+.vr-country-label.dim {
+  opacity: 0.35;
+}

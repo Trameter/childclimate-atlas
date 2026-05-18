@@ -128,12 +128,105 @@
   });
   globeGroup.add(new THREE.Mesh(haloGeom, haloMat));
 
+  // Graticule — subtle lat/lng grid lines on the sphere surface so the
+  // globe reads as Earth (parallels at 0°, ±30°, ±60°; meridians every 60°).
+  // Low opacity so they suggest "this is a planet" without competing with
+  // the beacons for attention.
+  function buildGraticule() {
+    const group = new THREE.Group();
+    const mat = new THREE.LineBasicMaterial({
+      color: 0xFAF8F4, transparent: true, opacity: 0.10,
+    });
+    const segs = 96;
+    // Parallels (lines of latitude — circles)
+    for (const lat of [-60, -30, 0, 30, 60]) {
+      const pts = [];
+      for (let i = 0; i <= segs; i++) {
+        const lng = -180 + (360 * i / segs);
+        pts.push(latLngToVec3(lat, lng, GLOBE_RADIUS * 1.001));
+      }
+      const g = new THREE.BufferGeometry().setFromPoints(pts);
+      const m = mat.clone();
+      // Equator is slightly brighter as a visual anchor.
+      if (lat === 0) m.opacity = 0.18;
+      group.add(new THREE.Line(g, m));
+    }
+    // Meridians (lines of longitude — half-circles pole to pole)
+    for (const lng of [-150, -90, -30, 30, 90, 150]) {
+      const pts = [];
+      for (let i = 0; i <= segs / 2; i++) {
+        const lat = -90 + (180 * i / (segs / 2));
+        pts.push(latLngToVec3(lat, lng, GLOBE_RADIUS * 1.001));
+      }
+      const g = new THREE.BufferGeometry().setFromPoints(pts);
+      group.add(new THREE.Line(g, mat.clone()));
+    }
+    return group;
+  }
+  globeGroup.add(buildGraticule());
+
   // Beacons live inside a group that we rotate to centre the active country.
   // Rotation = the inverse of the country's lat/lng → globe-space mapping.
   let beaconsGroup = new THREE.Group();
   globeGroup.add(beaconsGroup);
   // Track each beacon for per-frame pulse animation.
   let pulsingBeacons = [];  // [{mesh, baseScale, baseOpacity}]
+
+  // ---- Country labels (DOM overlay) ----
+  // For each country, a permanent 3D anchor vector at its lat/lng on the
+  // globe surface. Each render frame we project that vector to screen
+  // coords and reposition the DOM label there. The label hides when its
+  // anchor is on the far side of the globe (i.e. behind it from the
+  // camera's POV) so the visible hemisphere always shows the right names.
+  const COUNTRY_LABEL_ANCHORS = {};
+  function setupCountryLabels() {
+    const container = $("vr-country-labels");
+    if (!container) return;
+    container.innerHTML = "";
+    for (const iso of Object.keys(COUNTRY_CENTER)) {
+      const c = COUNTRY_CENTER[iso];
+      // Anchor slightly above surface so the label sits proud of the dots.
+      COUNTRY_LABEL_ANCHORS[iso] = latLngToVec3(c.lat, c.lng, GLOBE_RADIUS * 1.18);
+      const el = document.createElement("div");
+      el.className = "vr-country-label";
+      el.dataset.iso = iso;
+      el.textContent = c.name;
+      container.appendChild(el);
+    }
+  }
+  setupCountryLabels();
+
+  function updateCountryLabels() {
+    if (xrSession) return;  // labels live in DOM; only meaningful in non-XR preview
+    const container = $("vr-country-labels");
+    if (!container) return;
+    const cameraWorld = camera.getWorldPosition(new THREE.Vector3());
+    const globeWorld = globeGroup.getWorldPosition(new THREE.Vector3());
+    const camToGlobe = new THREE.Vector3().subVectors(cameraWorld, globeWorld).normalize();
+    for (const el of container.children) {
+      const iso = el.dataset.iso;
+      const anchor = COUNTRY_LABEL_ANCHORS[iso];
+      if (!anchor) continue;
+      // Transform anchor by globeGroup's world matrix to get its current
+      // position after rotation.
+      const world = anchor.clone().applyMatrix4(globeGroup.matrixWorld);
+      const dirFromCenter = new THREE.Vector3().subVectors(world, globeWorld).normalize();
+      const facing = dirFromCenter.dot(camToGlobe);  // >0 = visible hemisphere
+      if (facing < 0.05) {
+        el.style.opacity = "0";
+        continue;
+      }
+      // Project to screen
+      const projected = world.clone().project(camera);
+      const x = (projected.x * 0.5 + 0.5) * window.innerWidth;
+      const y = (-projected.y * 0.5 + 0.5) * window.innerHeight;
+      el.style.left = x + "px";
+      el.style.top = y + "px";
+      el.style.opacity = String(Math.min(1, facing * 1.6));
+      el.classList.toggle("active", iso === currentIso);
+      el.classList.toggle("dim", iso !== currentIso);
+    }
+  }
 
   // ---------------------------------------------------------------------
   // Lat/lng → globe-surface vector
@@ -301,27 +394,45 @@
   }
 
   async function setupXrButton() {
-    const btn = $("vr-enter-btn");
+    const vrBtn = $("vr-enter-btn");
+    const arBtn = $("vr-ar-btn");
     if (!navigator.xr) {
-      btn.disabled = true;
-      btn.title = "WebXR not available in this browser. Open this page in a Quest browser, Android Chrome, or use a WebXR emulator extension on desktop Chrome.";
-      btn.querySelector(".vr-enter-label").textContent = "VR not supported";
+      vrBtn.disabled = true;
+      vrBtn.title = "WebXR not available in this browser. Open this page in a Quest browser, Android Chrome, or use a WebXR emulator extension on desktop Chrome.";
+      vrBtn.querySelector(".vr-enter-label").textContent = "VR not supported";
+      arBtn.disabled = true;
+      arBtn.title = "WebXR not available.";
+      arBtn.querySelector(".vr-enter-label").textContent = "AR not supported";
       return;
     }
+    // VR session check
     try {
-      const supported = await navigator.xr.isSessionSupported("immersive-vr");
-      if (!supported) {
-        btn.disabled = true;
-        btn.title = "This browser has WebXR but no immersive-vr session type. On desktop Chrome, try a WebXR emulator extension.";
-        btn.querySelector(".vr-enter-label").textContent = "VR not supported";
-        return;
+      const vrOk = await navigator.xr.isSessionSupported("immersive-vr");
+      if (vrOk) {
+        vrBtn.disabled = false;
+        vrBtn.title = "Enter the immersive VR session";
+        vrBtn.addEventListener("click", () => enterXr("immersive-vr"));
+      } else {
+        vrBtn.title = "This browser has WebXR but no immersive-vr session type. On desktop Chrome, try a WebXR emulator extension.";
+        vrBtn.querySelector(".vr-enter-label").textContent = "VR not supported";
       }
-      btn.disabled = false;
-      btn.title = "Enter the immersive VR session";
-      btn.addEventListener("click", enterVr);
     } catch (e) {
-      btn.disabled = true;
-      btn.title = `WebXR error: ${e.message}`;
+      vrBtn.title = `WebXR error: ${e.message}`;
+    }
+    // AR session check (separate — most desktop browsers have neither;
+    // Android Chrome typically has AR but not VR; Quest browser has both)
+    try {
+      const arOk = await navigator.xr.isSessionSupported("immersive-ar");
+      if (arOk) {
+        arBtn.disabled = false;
+        arBtn.title = "Drop the globe into your physical room (AR passthrough)";
+        arBtn.addEventListener("click", () => enterXr("immersive-ar"));
+      } else {
+        arBtn.title = "This browser doesn't support immersive-ar sessions.";
+        arBtn.querySelector(".vr-enter-label").textContent = "AR not supported";
+      }
+    } catch (e) {
+      arBtn.title = `WebXR AR error: ${e.message}`;
     }
   }
 
@@ -348,25 +459,45 @@
   let controllers = [];
 
   let xrSession = null;
-  async function enterVr() {
+  let xrSessionType = null;
+  async function enterXr(sessionType) {
     if (xrSession) return;
     try {
-      xrSession = await navigator.xr.requestSession("immersive-vr", {
-        optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"],
-      });
+      const opts = sessionType === "immersive-ar"
+        ? {
+            requiredFeatures: ["local-floor"],
+            optionalFeatures: ["hit-test", "dom-overlay", "hand-tracking"],
+            domOverlay: { root: document.body },
+          }
+        : {
+            optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"],
+          };
+      xrSession = await navigator.xr.requestSession(sessionType, opts);
+      xrSessionType = sessionType;
       document.body.classList.add("in-xr");
+      document.body.classList.toggle("in-xr-ar", sessionType === "immersive-ar");
       await renderer.xr.setSession(xrSession);
       controllers = [attachController(0), attachController(1)];
+
+      // AR sessions show passthrough — hide the dark scene background so
+      // the room shows through.
+      if (sessionType === "immersive-ar") {
+        scene.background = null;
+      }
+
       xrSession.addEventListener("end", () => {
-        document.body.classList.remove("in-xr");
+        document.body.classList.remove("in-xr", "in-xr-ar");
         xrSession = null;
+        xrSessionType = null;
         controllers.forEach(c => scene.remove(c));
         controllers = [];
         $("vr-enter-btn").querySelector(".vr-enter-label").textContent = "Enter VR";
+        $("vr-ar-btn").querySelector(".vr-enter-label").textContent = "Enter AR";
       });
-      $("vr-enter-btn").querySelector(".vr-enter-label").textContent = "Exit VR";
+      $("vr-enter-btn").querySelector(".vr-enter-label").textContent = sessionType === "immersive-vr" ? "Exit VR" : "Enter VR";
+      $("vr-ar-btn").querySelector(".vr-enter-label").textContent = sessionType === "immersive-ar" ? "Exit AR" : "Enter AR";
     } catch (e) {
-      setStatus(`Couldn't start VR: ${e.message}`, "unavailable");
+      setStatus(`Couldn't start ${sessionType === "immersive-ar" ? "AR" : "VR"}: ${e.message}`, "unavailable");
     }
   }
 
@@ -529,6 +660,7 @@
       m.material.opacity = m.userData.baseOpacity * (0.75 + 0.25 * Math.sin(tNow * 2.2));
     }
 
+    updateCountryLabels();
     renderer.render(scene, camera);
   });
 
