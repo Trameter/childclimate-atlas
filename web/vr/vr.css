@@ -368,3 +368,31 @@ body.in-xr .topbar {
 .vr-country-label.dim {
   opacity: 0.35;
 }
+
+
+/* ---- Ambient drone toggle ---- */
+.vr-audio-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  background: rgba(20, 25, 38, 0.78);
+  color: var(--paper-mute);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.vr-audio-btn:hover { color: var(--paper); border-color: var(--paper-soft); }
+.vr-audio-btn.active {
+  color: var(--ember);
+  border-color: var(--ember);
+  background: rgba(216, 123, 79, 0.10);
+}
+.vr-audio-btn .vr-audio-icon { font-family: serif; font-size: 14px; line-height: 1; }
