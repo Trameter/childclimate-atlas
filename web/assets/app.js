@@ -631,6 +631,31 @@ function buildSpotlightQueue() {
   // Pull from the CURRENT filtered set so the spotlight always reflects
   // whatever the user is looking at (country switch, state filter, etc.).
   if (!filteredFeatures || filteredFeatures.length === 0) return [];
+
+  // Multi-country mode: interleave top-N from each country so the tour
+  // bounces BGD -> NGA -> GTM and tells a global story instead of
+  // dwelling on whichever country happens to have the highest scores.
+  // (BGD currently dominates: top 77.8 vs NGA 75.3 vs GTM 72.5.)
+  const hasMulti = IS_3D && filteredFeatures.some(f => f.properties._iso3);
+  if (hasMulti) {
+    const order = ["BGD", "NGA", "GTM"];
+    const perCountry = {};
+    for (const iso of order) {
+      const fs = filteredFeatures
+        .filter(f => f.properties._iso3 === iso)
+        .sort((a, b) => b.properties.risk_score - a.properties.risk_score);
+      perCountry[iso] = fs.slice(0, 3);  // top 3 per country = 9 stops
+    }
+    const interleaved = [];
+    for (let i = 0; i < 3; i++) {
+      for (const iso of order) {
+        if (perCountry[iso][i]) interleaved.push(perCountry[iso][i]);
+      }
+    }
+    if (interleaved.length > 0) return interleaved;
+    // Fall through to single-country path if no _iso3 tags found
+  }
+
   const sorted = [...filteredFeatures].sort(
     (a, b) => b.properties.risk_score - a.properties.risk_score
   );
@@ -793,6 +818,28 @@ function playSpotlightIntro() {
   }, SPOTLIGHT_INTRO_MS - 250);
 }
 
+// Switch the active country WITHOUT reloading data or kicking off the
+// full switchCountry pipeline. Used during the spotlight when the next
+// stop belongs to a different country than the currently-active one —
+// just want the aura tint + opacity emphasis + meta line to follow.
+function setActiveCountryQuietly(iso3) {
+  if (!iso3 || iso3 === _currentCountryIso) return;
+  _currentCountryIso = iso3;
+  // Sync the country dropdown so the UI reflects the change.
+  const sel = document.getElementById("country");
+  if (sel && sel.value !== iso3) sel.value = iso3;
+  // Sync the chip text + HUD line.
+  const newName = COUNTRY_NAMES[iso3] || iso3;
+  const chipText = document.getElementById("facility-chip-text");
+  if (chipText) chipText.textContent = `${newName} · ${(countryDataByIso[iso3]?.features?.length || 0).toLocaleString()} facilities`;
+  const hudC = document.getElementById("hud-country");
+  if (hudC) hudC.textContent = `${newName} · ${(countryDataByIso[iso3]?.features?.length || 0).toLocaleString()} facilities`;
+  // Aura + opacity emphasis follow the new active country.
+  setCountryAura(iso3);
+  applyActiveCountryOpacity(iso3);
+  setUrlParam("country", iso3);
+}
+
 function visitNextSpotlightStop() {
   if (!tourActive) return;
   if (spotlightIdx >= spotlightQueue.length) {
@@ -806,6 +853,9 @@ function visitNextSpotlightStop() {
   hideSpotlightPopup();
   const f = spotlightQueue[spotlightIdx];
   const [lng, lat] = f.geometry.coordinates;
+  // Auto-switch active country if this stop is in a different country —
+  // narrative beat: 'now we are in Nigeria, now in Bangladesh.'
+  if (f.properties._iso3) setActiveCountryQuietly(f.properties._iso3);
 
   // Distance-aware pacing. Squared degree distance between current camera
   // center and the target. Cheap enough to compute per stop, no need for
