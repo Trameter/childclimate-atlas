@@ -36,12 +36,16 @@ sources:
                             # Nigeria-only; grid3_src.fetch() is a no-op elsewhere.
 
 # Scoring weights — sum to 1.0
-# These are tuned heuristically for the prototype; the model supports
-# country-specific overrides as better local data becomes available.
+# Country-specific override: Nigeria is heat-dominant (sub-Saharan inland
+# heat-index days routinely exceed 200/yr in the north). The 0.05 lift
+# on heat_exposure vs the global default reflects that the most-saturated
+# heat facilities cluster against the country's ceiling otherwise; taking
+# it from facility_fragility, which is the weakest signal at v0.2
+# (heuristic OSM-tag inference until WHO SARA data lands in v0.3).
 scoring_weights:
-  heat_exposure: 0.25
+  heat_exposure: 0.30
   air_pollution: 0.25
   flood_risk: 0.15
   drought_risk: 0.10
   child_density: 0.15
-  facility_fragility: 0.10
+  facility_fragility: 0.05
