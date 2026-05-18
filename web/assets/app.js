@@ -170,6 +170,23 @@ function tagFeaturesIso(features, iso) {
   return features;
 }
 
+// Promote nested climate.* and air.* values to top-level feature properties
+// so MapLibre expressions (heatmap weight, paint case, etc.) can read them
+// via ["get", "heat_index_days"] without needing nested-property access
+// (which MapLibre doesn't support cleanly). Idempotent — running twice is
+// fine. Handles both object and JSON-string forms of climate/air.
+function flattenClimateAir(features) {
+  for (const f of features) {
+    const p = f.properties;
+    const c = typeof p.climate === "string" ? (function(){ try { return JSON.parse(p.climate); } catch { return {}; } })() : (p.climate || {});
+    const a = typeof p.air === "string" ? (function(){ try { return JSON.parse(p.air); } catch { return {}; } })() : (p.air || {});
+    if (c.heat_index_days != null) p.heat_index_days = c.heat_index_days;
+    if (c.heavy_precip_days != null) p.heavy_precip_days = c.heavy_precip_days;
+    if (c.longest_dry_run_days != null) p.longest_dry_run_days = c.longest_dry_run_days;
+    if (a.pm25_avg_ugm3 != null) p.pm25_avg_ugm3 = a.pm25_avg_ugm3;
+  }
+}
+
 // Re-build allFeatures from every cached country (in 3D mode). Used after
 // background country loads land so they get merged into the active view.
 function mergeAllCountriesIntoAllFeatures() {
@@ -2434,6 +2451,7 @@ async function switchCountry(iso3) {
   // below — by the time the user notices, all three are visible.
   countryDataByIso[iso3] = data;
   tagFeaturesIso(data.features || [], iso3);
+  flattenClimateAir(data.features || []);
   if (IS_3D) {
     mergeAllCountriesIntoAllFeatures();
   } else {
@@ -2501,6 +2519,7 @@ async function loadOtherCountries(activeIso) {
       const data = await loadAtlas(iso, { showProgress: false });
       countryDataByIso[iso] = data;
       tagFeaturesIso(data.features || [], iso);
+      flattenClimateAir(data.features || []);
       mergeAllCountriesIntoAllFeatures();
       applyFilters();
     } catch (e) {
@@ -2666,8 +2685,76 @@ document.addEventListener("DOMContentLoaded", () => {
   // SPA-style intercept if we ever want to load /about without a reload.
 });
 
-// ---- heatmap layer toggle ----
+// ---- hazard overlay toggle ----
+// The previous "Heatmap" button showed an aggregate risk-density layer
+// that duplicated what the colored dots already say. Replaced with a
+// "Hazards" toggle that paints FOUR distinct climate-input heatmaps
+// simultaneously — heat (red), drought (brown), flood (blue), and
+// PM2.5 (warm grey). Each is weighted by the actual underlying climate
+// value, so the user sees WHERE on the planet each hazard is hot, not
+// just where high-risk facilities cluster.
 let heatmapVisible = false;
+
+// Hazard layer definitions. Each entry maps a layer id to:
+//   prop      — the feature property the heatmap weights by
+//   max       — the value at which weight saturates to 1.0
+//   color     — the gradient stops [opacity, color] from low to high density
+//   radius    — px per density unit at zoom 14 (smaller = tighter clusters)
+const HAZARD_LAYERS = [
+  {
+    id: "haz-heat",
+    prop: "heat_index_days",
+    max: 240,
+    radiusZ14: 36,
+    stops: [
+      [0,   "rgba(0,0,0,0)"],
+      [0.20, "rgba(216, 123, 79, 0.20)"],
+      [0.40, "rgba(216, 123, 79, 0.45)"],
+      [0.60, "rgba(195,  82, 72, 0.62)"],
+      [0.80, "rgba(195,  82, 72, 0.80)"],
+      [1.00, "rgba(166,  61, 52, 0.90)"],
+    ],
+  },
+  {
+    id: "haz-drought",
+    prop: "longest_dry_run_days",
+    max: 90,
+    radiusZ14: 28,
+    stops: [
+      [0,   "rgba(0,0,0,0)"],
+      [0.20, "rgba(168, 138,  82, 0.16)"],
+      [0.45, "rgba(140, 108,  62, 0.45)"],
+      [0.70, "rgba(102,  78,  44, 0.65)"],
+      [1.00, "rgba( 72,  52,  28, 0.82)"],
+    ],
+  },
+  {
+    id: "haz-flood",
+    prop: "heavy_precip_days",
+    max: 30,
+    radiusZ14: 24,
+    stops: [
+      [0,   "rgba(0,0,0,0)"],
+      [0.20, "rgba( 95, 165, 199, 0.18)"],
+      [0.45, "rgba( 70, 130, 175, 0.45)"],
+      [0.70, "rgba( 46,  98, 152, 0.65)"],
+      [1.00, "rgba( 24,  62, 120, 0.82)"],
+    ],
+  },
+  {
+    id: "haz-pm25",
+    prop: "pm25_avg_ugm3",
+    max: 50,
+    radiusZ14: 26,
+    stops: [
+      [0,   "rgba(0,0,0,0)"],
+      [0.20, "rgba(217, 182,  83, 0.18)"],
+      [0.45, "rgba(180, 150,  72, 0.42)"],
+      [0.70, "rgba(140, 116,  60, 0.62)"],
+      [1.00, "rgba(110,  90,  48, 0.78)"],
+    ],
+  },
+];
 
 // Facility-related layers that get hidden while the heatmap is on, so the
 // heatmap reads as a distinct REGIONAL view (concentration of risk by area)
@@ -2688,41 +2775,61 @@ function setFacilityLayersVisible(visible) {
   });
 }
 
+function ensureHazardLayers() {
+  for (const h of HAZARD_LAYERS) {
+    if (map.getLayer(h.id)) continue;
+    const colorExpr = ["interpolate", ["linear"], ["heatmap-density"]];
+    for (const [stop, color] of h.stops) { colorExpr.push(stop, color); }
+    map.addLayer({
+      id: h.id,
+      type: "heatmap",
+      source: "facilities",
+      maxzoom: 12,
+      paint: {
+        // Weight: the feature's actual climate value normalized to 0-1.
+        // Features missing this value contribute 0.
+        "heatmap-weight": [
+          "interpolate", ["linear"],
+          ["coalesce", ["get", h.prop], 0],
+          0, 0, h.max, 1,
+        ],
+        // Density renders larger as the user zooms in to country level.
+        "heatmap-intensity": [
+          "interpolate", ["linear"], ["zoom"], 0, 0.4, 10, 1.4, 12, 2.0,
+        ],
+        "heatmap-color": colorExpr,
+        "heatmap-radius": [
+          "interpolate", ["linear"], ["zoom"], 0, 6, 8, 18, 14, h.radiusZ14,
+        ],
+        "heatmap-opacity": [
+          "interpolate", ["linear"], ["zoom"], 0, 0.85, 12, 0.55,
+        ],
+      },
+    }, "facilities-glow");
+  }
+}
+
 function toggleHeatmap() {
   heatmapVisible = !heatmapVisible;
   const btn = document.getElementById("btn-heatmap");
   const hud = document.getElementById("hud-heatmap");
   if (heatmapVisible) {
-    btn?.classList.add("active");
-    if (hud) hud.textContent = "Heatmap · on";
-    if (!map.getLayer("heatmap")) {
-      map.addLayer({
-        id: "heatmap", type: "heatmap", source: "facilities",
-        maxzoom: 14,
-        paint: {
-          "heatmap-weight": ["interpolate", ["linear"], ["get", "risk_score"], 0, 0, 100, 1],
-          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, 0.5, 14, 2],
-          "heatmap-color": [
-            "interpolate", ["linear"], ["heatmap-density"],
-            0, "rgba(0,0,0,0)",
-            0.2, "#6FA774",   // low
-            0.4, "#D9B653",   // mod
-            0.6, "#D9894F",   // high
-            0.8, "#C35248",   // severe
-            1,   "#A63D34"    // extreme deepening
-          ],
-          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 8, 14, 30],
-          "heatmap-opacity": 0.75,
-        },
-      }, "facilities-glow");
+    ensureHazardLayers();
+    for (const h of HAZARD_LAYERS) {
+      if (map.getLayer(h.id)) map.setLayoutProperty(h.id, "visibility", "visible");
     }
-    map.setLayoutProperty("heatmap", "visibility", "visible");
     setFacilityLayersVisible(false);
+    btn?.classList.add("active");
+    if (hud) hud.textContent = "Hazards · on";
+    if (btn) btn.textContent = "Hide hazards";
   } else {
-    btn?.classList.remove("active");
-    if (hud) hud.textContent = "Heatmap · off";
-    if (map.getLayer("heatmap")) map.setLayoutProperty("heatmap", "visibility", "none");
+    for (const h of HAZARD_LAYERS) {
+      if (map.getLayer(h.id)) map.setLayoutProperty(h.id, "visibility", "none");
+    }
     setFacilityLayersVisible(true);
+    btn?.classList.remove("active");
+    if (hud) hud.textContent = "Hazards · off";
+    if (btn) btn.textContent = "Hazards";
   }
 }
 
