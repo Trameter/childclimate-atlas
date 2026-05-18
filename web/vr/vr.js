@@ -58,10 +58,14 @@
   scene.background = null;
 
   const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.05, 200);
-  const CAM_HOME = new THREE.Vector3(0, 1.6, 2.4);
-  const CAM_INTRO = new THREE.Vector3(0, 1.8, 6.5);
+  // Non-VR camera positions account for the globe being at z = -1.5.
+  // CAM_HOME sits ~2.4m back from the globe along the same viewing axis we
+  // had before; CAM_INTRO is far back for the cinematic fly-in.
+  const CAM_HOME = new THREE.Vector3(0, 1.6, 0.9);
+  const CAM_INTRO = new THREE.Vector3(0, 1.8, 5.0);
+  const CAM_LOOK = new THREE.Vector3(0, 1.0, -1.5);
   camera.position.copy(CAM_INTRO);
-  camera.lookAt(0, 1.0, 0);
+  camera.lookAt(CAM_LOOK);
 
   // AudioListener attaches to camera for spatial-aware listening pose.
   const listener = new THREE.AudioListener();
@@ -100,7 +104,10 @@
   // --- Globe ---
   const GLOBE_RADIUS = 0.42;
   const globeGroup = new THREE.Group();
-  globeGroup.position.set(0, 1.35, 0);
+  // Globe sits in front of the user (VR room origin is roughly where the
+  // user is standing; -Z is forward). Chest height = 1.35m. 1.5m forward
+  // puts the globe at comfortable look distance without being in your face.
+  globeGroup.position.set(0, 1.35, -1.5);
   globeGroup.rotation.z = THREE.MathUtils.degToRad(23.4);
   scene.add(globeGroup);
 
@@ -711,16 +718,25 @@
   renderer.setSize(window.innerWidth, window.innerHeight, false);
 
   // ---------------------------------------------------------------------
-  // Camera intro
+  // Camera intro (non-VR only)
+  //
+  // Previously this ran EVERY frame and lerped camera.position to CAM_HOME
+  // even after the intro completed — which silently overrode wheel-zoom
+  // AND the XR session's headset pose (so rotating the emulated headset
+  // looked like nothing happened). Now: run only until t hits 1, then
+  // stop touching the camera. Also skipped entirely while an XR session
+  // is active — Three.js's xr.session controls the camera in that case.
   // ---------------------------------------------------------------------
   const INTRO_MS = 2200;
   const introStart = performance.now();
+  let introDone = false;
   function runIntro(now) {
+    if (introDone || xrSession) return;
     const t = Math.min((now - introStart) / INTRO_MS, 1);
     const eased = 1 - Math.pow(1 - t, 3);
     camera.position.lerpVectors(CAM_INTRO, CAM_HOME, eased);
-    camera.lookAt(0, 1.0, 0);
-    return t < 1;
+    camera.lookAt(CAM_LOOK);
+    if (t >= 1) introDone = true;
   }
 
   // ---------------------------------------------------------------------
@@ -728,7 +744,7 @@
   // ---------------------------------------------------------------------
   let lastAudioUpdate = 0;
   renderer.setAnimationLoop((time, frame) => {
-    if (runIntro(performance.now())) { /* intro running */ }
+    runIntro(performance.now());
 
     if (!userInteracting || (performance.now() - lastInteract > AUTO_ROTATE_RESUME_MS)) {
       userInteracting = false;
