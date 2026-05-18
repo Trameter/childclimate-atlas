@@ -531,6 +531,72 @@ function greatCirclePath(start, end, steps = 64) {
   return points;
 }
 
+// Compute the subsolar point (where the sun is directly overhead) for the
+// current UTC time. Uses simplified astronomical formulas — accurate to
+// ~0.5° which is plenty at globe scale. Returns [longitude, latitude].
+function computeSubsolarPoint() {
+  const now = new Date();
+  const utcMs = now.getTime();
+  const julianDay = utcMs / 86400000 + 2440587.5;
+  const n = julianDay - 2451545.0;
+  const L = ((280.460 + 0.9856474 * n) % 360 + 360) % 360;
+  const g = (((357.528 + 0.9856003 * n) % 360 + 360) % 360) * Math.PI / 180;
+  const lambda = (L + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) * Math.PI / 180;
+  const epsilon = 23.439 * Math.PI / 180;
+  const declination = Math.asin(Math.sin(epsilon) * Math.sin(lambda)) * 180 / Math.PI;
+  const eqOfTimeMin = 4 * (L - 0.0057183 - Math.atan2(Math.cos(epsilon) * Math.sin(lambda), Math.cos(lambda)) * 180 / Math.PI);
+  const hourUtc = now.getUTCHours() + now.getUTCMinutes() / 60 + now.getUTCSeconds() / 3600;
+  let lng = -((hourUtc - 12) * 15) - (eqOfTimeMin / 4);
+  lng = ((lng + 540) % 360) - 180;
+  return [lng, declination];
+}
+
+function addSunMarker() {
+  if (map.getSource("sun-marker")) return;
+  map.addSource("sun-marker", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  // Outer halo — soft and wide.
+  map.addLayer({
+    id: "sun-glow",
+    type: "circle",
+    source: "sun-marker",
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 0, 28, 3, 60, 6, 100],
+      "circle-color": "#FFD27A",
+      "circle-opacity": 0.30,
+      "circle-blur": 1.0,
+    },
+  });
+  // Inner core — bright.
+  map.addLayer({
+    id: "sun-core",
+    type: "circle",
+    source: "sun-marker",
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 0, 8, 3, 14, 6, 22],
+      "circle-color": "#FFE9B0",
+      "circle-opacity": 0.95,
+      "circle-blur": 0.25,
+    },
+  });
+  updateSunMarker();
+  // Refresh once a minute — the sun moves ~0.25° of longitude per minute.
+  setInterval(updateSunMarker, 60000);
+}
+
+function updateSunMarker() {
+  const src = map.getSource("sun-marker");
+  if (!src) return;
+  const [lng, lat] = computeSubsolarPoint();
+  src.setData({
+    type: "FeatureCollection",
+    features: [{
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [lng, lat] },
+      properties: { kind: "sun" },
+    }],
+  });
+}
+
 // Set (or refresh) the country aura — a single Point feature at the country's
 // center, tinted by the country's dominant climate hazard. The actual circle
 // rendering (radius, blur, opacity-by-zoom) is configured once in updateMap;
@@ -1605,6 +1671,13 @@ function updateMap() {
   // Multi-country mode: apply active-country opacity case expressions now
   // that the layers exist (no-op in 2D).
   applyActiveCountryOpacity(_currentCountryIso);
+
+  // Sun marker — a golden glow at the subsolar point (where the sun is
+  // currently directly overhead). Visible only in 3D; on a Mercator map
+  // it has no useful spatial meaning. Refreshes every minute as Earth
+  // rotates. Adds a subtle 'time is real, climate is real, this is now'
+  // beat without competing with the data layers.
+  if (IS_3D) addSunMarker();
 
   // Country-trail — a glowing great-circle line on the globe drawn between
   // the previous country's center and the new country's center whenever
