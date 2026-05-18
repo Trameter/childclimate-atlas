@@ -420,9 +420,9 @@ body.in-xr .topbar {
 /* ---- Spotlight stop popup (rendered at each tour stop) ---- */
 .vr-spot-popup {
   position: fixed;
-  top: 50%;
+  top: 80px;     /* anchored near the top so it doesn't sit on the globe disc */
   left: 50%;
-  transform: translate(-50%, -50%) translateY(-160px);
+  transform: translateX(-50%);
   width: 360px;
   max-width: calc(100vw - 32px);
   padding: 18px 20px 16px;
@@ -439,8 +439,8 @@ body.in-xr .topbar {
   pointer-events: none;  /* tour is auto-driven; clicks pass through */
 }
 @keyframes vr-spot-pop-in {
-  from { opacity: 0; transform: translate(-50%, -50%) translateY(-140px); }
-  to   { opacity: 1; transform: translate(-50%, -50%) translateY(-160px); }
+  from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
+  to   { opacity: 1; transform: translateX(-50%); }
 }
 .vr-spot-popup .vr-spot-stage {
   font-family: "JetBrains Mono", monospace;

@@ -704,9 +704,10 @@
   function updateHover(clientX, clientY) {
     // In an active XR session the desktop tooltip just leaks through as
     // a stuck DOM overlay (the emulator composites DOM on top of the
-    // canvas). Skip entirely so it can't show, and force-hide in case
-    // it was visible when the user clicked Enter VR.
-    if (xrSession) {
+    // canvas). Skip entirely so it can't show. Same for Spotlight tour —
+    // the auto-cycle is the foreground; a competing hover tooltip is
+    // noise. Force-hide in case it was visible when either started.
+    if (xrSession || tourActive) {
       tooltip.hidden = true;
       return;
     }
@@ -998,6 +999,10 @@
     }
     tourActive = true;
     tourIdx = 0;
+    // Clear any pre-existing hover tooltip + detail bubble so they don't
+    // sit behind the spotlight popup during the cycle.
+    tooltip.hidden = true;
+    $("vr-detail").hidden = true;
     $("vr-tour-btn").classList.add("active");
     $("vr-tour-btn").querySelector(".vr-tour-btn .vr-enter-label, .vr-enter-label").textContent = "Stop tour";
     $("vr-tour-btn").querySelector(".vr-enter-icon").textContent = "■";
