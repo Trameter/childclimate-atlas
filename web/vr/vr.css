@@ -278,3 +278,35 @@ body.in-xr .topbar {
   .vr-enter-btn { padding: 12px 20px; font-size: 13px; }
   .vr-detail { width: calc(100vw - 32px); }
 }
+
+
+/* ---- Hover tooltip (non-VR preview) ---- */
+.vr-tooltip {
+  position: fixed;
+  z-index: 20;
+  pointer-events: none;
+  padding: 6px 10px;
+  background: rgba(20, 25, 38, 0.92);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 280px;
+}
+.vr-tooltip .t {
+  font-size: 12px;
+  color: var(--paper);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vr-tooltip .s {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: var(--ember);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}

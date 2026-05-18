@@ -1,27 +1,36 @@
 /* ===========================================================================
-   /vr — WebXR Atlas (Category 4 foundation)
+   /vr — WebXR Atlas (Category 4)
 
-   Tabletop globe at standing height. Each country can be loaded; facilities
-   appear as glowing beacons positioned on the sphere by lat/lng, sized +
-   coloured by their 0–100 risk score. In a WebXR session the user can walk
-   around the table and look at the beacons from any angle; in the non-VR
-   preview the same scene renders with mouse-orbit + scroll-zoom controls
-   so anyone without a headset can see what's there.
+   Floating tilted globe with facility beacons, slow rotation, severe-band
+   beacons pulsing, a star field behind, and a camera intro on load. Country
+   switches animate: old beacons fade out, globe rotates to centre the new
+   country, new beacons fade in.
 
-   This is the foundation for Category 4 (Agog territory):
-     - VR mode             [this file] ✓
-     - AR mode             [planned — same scene, AR session type]
-     - Spatial audio cues  [planned]
-     - Hand-controller picks [planned]
+   What's wired:
+     - Non-VR preview on any WebGL2 browser (orbit drag, scroll zoom,
+       hover tooltip, click-for-detail, country picker)
+     - WebXR detection — Enter VR button enables only when an
+       immersive-vr session type is supported (Quest, Vision Pro, etc.)
+     - VR controller pointer + trigger pick when an XR session is active
 
-   Browser support: any WebGL2 browser renders the preview. WebXR session
-   entry requires navigator.xr (Quest, Vision Pro, Android Chrome) + the
-   `immersive-vr` session type. On unsupported devices the Enter VR button
-   stays disabled with a tooltip explaining why.
+   What's left for future Category-4 sessions:
+     - AR session type for phone passthrough
+     - Spatial audio cues on severe-band beacons
+     - True country borders (currently just beacons cluster the shape)
+     - Smoother teleport / movement controls
    =========================================================================== */
 
 (() => {
   const $ = (id) => document.getElementById(id);
+
+  // --- Country centres (for camera framing + globe rotation on switch) ---
+  const COUNTRY_CENTER = {
+    NGA: { lat: 9.1,  lng: 8.7,   name: "Nigeria"    },
+    BGD: { lat: 23.7, lng: 90.3,  name: "Bangladesh" },
+    GTM: { lat: 15.8, lng: -90.2, name: "Guatemala"  },
+  };
+
+  // Risk-band colour stops (match the 2D + 3D atlas).
   const RISK_STOPS = [
     [0,  0x6FA774],   // low
     [30, 0xD9B653],   // moderate
@@ -36,7 +45,9 @@
     return c;
   };
 
-  // ---- Three.js scene setup ----
+  // ---------------------------------------------------------------------
+  // Three.js setup
+  // ---------------------------------------------------------------------
   const canvas = $("vr-canvas");
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -46,61 +57,87 @@
   const scene = new THREE.Scene();
   scene.background = null;
 
-  // Camera + orbit-style controls for non-VR preview.
-  const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, 100);
-  camera.position.set(0, 1.6, 2.2);  // standing height, ~2m back from globe
+  // Camera + initial position for the cinematic intro (start far, ease in).
+  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.05, 200);
+  const CAM_HOME = new THREE.Vector3(0, 1.6, 2.4);   // standing eye level, ~2.4m back
+  const CAM_INTRO = new THREE.Vector3(0, 1.8, 6.5);  // starting far back for the swoop in
+  camera.position.copy(CAM_INTRO);
   camera.lookAt(0, 1.0, 0);
 
-  // Subtle ambient + directional light so the globe has shading.
-  scene.add(new THREE.AmbientLight(0xffffff, 0.45));
-  const dir = new THREE.DirectionalLight(0xfff2dd, 0.8);
-  dir.position.set(2, 3, 1.5);
-  scene.add(dir);
+  // Lights — soft ambient + a single warm key light so the globe has shading
+  // without going dark on the back side.
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  const key = new THREE.DirectionalLight(0xfff2dd, 0.85);
+  key.position.set(2.5, 3, 2);
+  scene.add(key);
+  const fill = new THREE.DirectionalLight(0x6FA8C9, 0.25);  // cool fill
+  fill.position.set(-2, 1, -2);
+  scene.add(fill);
 
-  // The "table" plane at floor level for VR spatial reference.
-  const tableGeom = new THREE.CircleGeometry(0.8, 48);
-  const tableMat = new THREE.MeshBasicMaterial({
-    color: 0x1E2433, transparent: true, opacity: 0.55, side: THREE.DoubleSide,
-  });
-  const table = new THREE.Mesh(tableGeom, tableMat);
-  table.rotation.x = -Math.PI / 2;
-  table.position.y = 0;
-  scene.add(table);
+  // --- Star field — far sphere with point sprites for ambient sky depth ---
+  function buildStarField() {
+    const N = 1500;
+    const positions = new Float32Array(N * 3);
+    const sizes = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      // Random direction, large radius. Avoid the lower hemisphere a bit so
+      // the lower half of the view doesn't compete with the floor halo.
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const r = 80 + Math.random() * 20;
+      positions[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+      positions[i*3+1] = Math.abs(r * Math.cos(phi)) * 0.6 + 0.5;  // bias up
+      positions[i*3+2] = r * Math.sin(phi) * Math.sin(theta);
+      sizes[i] = 0.04 + Math.random() * 0.10;
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.PointsMaterial({
+      color: 0xFAF8F4,
+      size: 0.20,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 0.65,
+      depthWrite: false,
+    });
+    return new THREE.Points(geom, mat);
+  }
+  scene.add(buildStarField());
 
-  // Tabletop globe — a sphere ~60 cm in diameter sitting on the table.
-  const GLOBE_RADIUS = 0.32;
+  // --- Globe group: hovers at eye level, tilted at Earth's axial 23.4° ---
+  // (Decorative — the data isn't north-up dependent — but it sells the
+  // "this is a real planet" reading rather than a school globe.)
+  const GLOBE_RADIUS = 0.42;
   const globeGroup = new THREE.Group();
-  globeGroup.position.set(0, 0.32 + 0.36, 0);  // table at 0, globe centre at ~1m
+  globeGroup.position.set(0, 1.35, 0);  // ~1.35m above floor = chest height
+  globeGroup.rotation.z = THREE.MathUtils.degToRad(23.4);
   scene.add(globeGroup);
 
+  // Inner sphere — dark base.
   const globeGeom = new THREE.SphereGeometry(GLOBE_RADIUS, 64, 48);
   const globeMat = new THREE.MeshStandardMaterial({
-    color: 0x12182A,
-    roughness: 0.85,
-    metalness: 0.05,
+    color: 0x10162A, roughness: 0.85, metalness: 0.06,
   });
   const globe = new THREE.Mesh(globeGeom, globeMat);
   globeGroup.add(globe);
 
-  // Subtle atmosphere ring around the globe — a slightly larger sphere with
-  // back-side rendering + alpha, fakes the bright halo from the 3D page.
-  const haloGeom = new THREE.SphereGeometry(GLOBE_RADIUS * 1.04, 64, 48);
+  // Atmosphere halo — back-side sphere with low alpha for the rim glow.
+  const haloGeom = new THREE.SphereGeometry(GLOBE_RADIUS * 1.08, 64, 48);
   const haloMat = new THREE.MeshBasicMaterial({
-    color: 0x6FA8C9, transparent: true, opacity: 0.10, side: THREE.BackSide,
+    color: 0x6FA8C9, transparent: true, opacity: 0.14, side: THREE.BackSide,
   });
   globeGroup.add(new THREE.Mesh(haloGeom, haloMat));
 
-  // Beacons group — holds the per-facility instanced meshes for the current country.
+  // Beacons live inside a group that we rotate to centre the active country.
+  // Rotation = the inverse of the country's lat/lng → globe-space mapping.
   let beaconsGroup = new THREE.Group();
   globeGroup.add(beaconsGroup);
+  // Track each beacon for per-frame pulse animation.
+  let pulsingBeacons = [];  // [{mesh, baseScale, baseOpacity}]
 
-  // Slow, subtle globe rotation when no user interaction.
-  let autoRotate = true;
-  let lastInteract = 0;
-  const AUTO_ROTATE_RESUME_MS = 4000;
-  const AUTO_ROTATE_SPEED = 0.0008;  // radians per frame
-
-  // ---- Lat/lng → cartesian on the globe ----
+  // ---------------------------------------------------------------------
+  // Lat/lng → globe-surface vector
+  // ---------------------------------------------------------------------
   function latLngToVec3(lat, lng, radius = GLOBE_RADIUS) {
     const phi = (90 - lat) * Math.PI / 180;
     const theta = (lng + 180) * Math.PI / 180;
@@ -111,74 +148,140 @@
     );
   }
 
-  // ---- Load and render a country ----
-  let currentIso = "BGD";  // default — has SEVERE band populated now
+  // ---------------------------------------------------------------------
+  // Country state
+  // ---------------------------------------------------------------------
+  let currentIso = "BGD";
   let currentFeatures = [];
 
   async function loadCountry(iso) {
-    setStatus(`Loading ${iso}…`, "loading");
-    currentIso = iso;
+    setStatus(`Loading ${COUNTRY_CENTER[iso].name}…`, "loading");
     document.querySelectorAll(".vr-country").forEach(b => {
       b.classList.toggle("active", b.dataset.iso === iso);
     });
+    currentIso = iso;
     try {
       const r = await fetch(`/data/${iso}.geojson`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const json = await r.json();
       currentFeatures = json.features || [];
-      buildBeacons(currentFeatures);
-      updateMeta();
-      setStatus(`${iso} loaded · ${currentFeatures.length.toLocaleString()} facilities`, "ready");
+      animateCountrySwap(iso, () => {
+        buildBeacons(currentFeatures);
+        updateMeta();
+        setStatus(`${COUNTRY_CENTER[iso].name} · ${currentFeatures.length.toLocaleString()} facilities`, "ready");
+      });
     } catch (e) {
       setStatus(`Failed to load ${iso}: ${e.message}`, "unavailable");
     }
   }
 
-  // ---- Beacon rendering ----
-  // Top-N approach: showing 50K beacons is fine on desktop but kills VR
-  // headset performance. Sample the top 1500 by risk for VR-friendly framerates.
+  // Country swap animation — fade beacons out, rotate to centre the new
+  // country, fade new beacons in. Times tuned so the fly + fade overlaps
+  // and the whole transition feels like one continuous beat (~1.4s total).
+  function animateCountrySwap(iso, onMidpoint) {
+    const c = COUNTRY_CENTER[iso];
+    // Target rotation: rotating the globe so the country's centre faces +Z
+    // (toward the camera). Yaw = -lng (in radians); pitch tilts the country
+    // upward to the camera's eyeline.
+    const targetYaw = -c.lng * Math.PI / 180;
+    const targetPitch = c.lat * Math.PI / 180 * 0.5;  // half-tilt feels right
+
+    const startYaw = beaconsGroup.rotation.y;
+    const startPitch = beaconsGroup.rotation.x;
+    const start = performance.now();
+    const DURATION = 900;
+
+    function frame(now) {
+      const t = Math.min((now - start) / DURATION, 1);
+      const eased = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3)/2;
+      beaconsGroup.rotation.y = startYaw + (targetYaw - startYaw) * eased;
+      beaconsGroup.rotation.x = startPitch + (targetPitch - startPitch) * eased;
+      // Globe sphere rotates to match the beacons (they're its skin).
+      globe.rotation.y = beaconsGroup.rotation.y;
+      // Fade out at first half, in at second half.
+      const fadeOut = Math.max(0, 1 - t * 2);
+      beaconsGroup.children.forEach(c => {
+        if (c.material) c.material.opacity = fadeOut * (c.userData.baseOpacity || 1);
+      });
+      if (t >= 0.5 && !frame._fired) {
+        frame._fired = true;
+        onMidpoint();  // swap beacons at the midpoint
+      }
+      if (t < 1) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  // ---------------------------------------------------------------------
+  // Beacons
+  // ---------------------------------------------------------------------
   const VR_BEACON_CAP = 1500;
   function buildBeacons(features) {
-    // Tear down previous beacons.
     while (beaconsGroup.children.length) {
       const c = beaconsGroup.children.pop();
       c.geometry?.dispose();
       c.material?.dispose();
     }
+    pulsingBeacons = [];
 
-    // Top N by risk score, then sample some lower-risk for context.
     const sorted = [...features].sort((a, b) =>
       (b.properties.risk_score || 0) - (a.properties.risk_score || 0)
     );
     const top = sorted.slice(0, Math.min(VR_BEACON_CAP, sorted.length));
 
-    // One small sphere per beacon, positioned on the globe surface, raised
-    // along its surface normal proportional to risk. A high-risk facility
-    // becomes a tall stalk; a low-risk one sits flat.
-    const beaconGeom = new THREE.SphereGeometry(0.0024, 8, 6);
+    const beaconGeom = new THREE.SphereGeometry(0.0030, 8, 6);
+
     for (const f of top) {
       const [lng, lat] = f.geometry.coordinates;
       const score = f.properties.risk_score || 0;
+      const band = bandFor(score);
       const surfacePos = latLngToVec3(lat, lng, GLOBE_RADIUS);
-      const stalkHeight = 0.015 + (score / 100) * 0.040;  // 1.5cm to 5.5cm
+      const stalkHeight = 0.018 + (score / 100) * 0.060;
       const beaconPos = surfacePos.clone().multiplyScalar((GLOBE_RADIUS + stalkHeight) / GLOBE_RADIUS);
 
-      const mat = new THREE.MeshBasicMaterial({ color: colorFor(score) });
+      const baseOpacity = band === 0 ? 0.55 : band === 1 ? 0.75 : 0.95;
+      const mat = new THREE.MeshBasicMaterial({
+        color: colorFor(score),
+        transparent: true,
+        opacity: 0,  // fade-in handled below
+      });
       const m = new THREE.Mesh(beaconGeom, mat);
       m.position.copy(beaconPos);
       m.userData.feature = f;
+      m.userData.baseOpacity = baseOpacity;
+      m.userData.baseScale = 1 + (band === 3 ? 0.6 : 0);  // severe = bigger
+      m.userData.band = band;
+      m.scale.setScalar(m.userData.baseScale);
       beaconsGroup.add(m);
 
-      // Thin stalk line from surface to beacon for tall ones, so the
-      // height-encodes-risk reading is clear.
-      if (stalkHeight > 0.02) {
+      if (band === 3) pulsingBeacons.push(m);
+
+      // Stalk line for the taller beacons, so the height-encodes-risk
+      // reading is clear at a glance.
+      if (stalkHeight > 0.025) {
         const stalkGeom = new THREE.BufferGeometry().setFromPoints([surfacePos, beaconPos]);
         const stalkMat = new THREE.LineBasicMaterial({
-          color: colorFor(score), transparent: true, opacity: 0.45,
+          color: colorFor(score),
+          transparent: true,
+          opacity: 0,  // fade-in handled below
         });
-        beaconsGroup.add(new THREE.Line(stalkGeom, stalkMat));
+        const stalk = new THREE.Line(stalkGeom, stalkMat);
+        stalk.userData.baseOpacity = baseOpacity * 0.50;
+        beaconsGroup.add(stalk);
       }
     }
+
+    // Fade-in over 800ms.
+    const start = performance.now();
+    const FADE_MS = 800;
+    function fadeFrame(now) {
+      const t = Math.min((now - start) / FADE_MS, 1);
+      beaconsGroup.children.forEach(c => {
+        if (c.material) c.material.opacity = t * (c.userData.baseOpacity || 1);
+      });
+      if (t < 1) requestAnimationFrame(fadeFrame);
+    }
+    requestAnimationFrame(fadeFrame);
   }
 
   function updateMeta() {
@@ -187,7 +290,9 @@
     $("vr-meta-line").textContent = `${total.toLocaleString()} facilities · ${severe.toLocaleString()} severe`;
   }
 
-  // ---- WebXR detection + button wiring ----
+  // ---------------------------------------------------------------------
+  // WebXR detection + button + controller pointer
+  // ---------------------------------------------------------------------
   function setStatus(text, klass) {
     const el = $("vr-status");
     el.querySelector(".vr-status-text").textContent = text;
@@ -207,7 +312,7 @@
       const supported = await navigator.xr.isSessionSupported("immersive-vr");
       if (!supported) {
         btn.disabled = true;
-        btn.title = "This browser has WebXR but no immersive-vr session type. On a desktop, try a WebXR emulator extension.";
+        btn.title = "This browser has WebXR but no immersive-vr session type. On desktop Chrome, try a WebXR emulator extension.";
         btn.querySelector(".vr-enter-label").textContent = "VR not supported";
         return;
       }
@@ -220,6 +325,28 @@
     }
   }
 
+  // Controllers — Three.js provides .getController(i) which returns an
+  // empty group that gets its pose updated each frame. We attach a thin
+  // line in front of it as a pointer; trigger ('select') casts a ray and
+  // drills into the targeted beacon.
+  const controllerPointerMat = new THREE.LineBasicMaterial({
+    color: 0xD87B4F, transparent: true, opacity: 0.85,
+  });
+  const controllerPointerGeom = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0, 0, -2),
+  ]);
+  function attachController(idx) {
+    const c = renderer.xr.getController(idx);
+    const line = new THREE.Line(controllerPointerGeom.clone(), controllerPointerMat.clone());
+    line.scale.z = 2;
+    c.add(line);
+    c.addEventListener("select", () => xrPick(c));
+    scene.add(c);
+    return c;
+  }
+  let controllers = [];
+
   let xrSession = null;
   async function enterVr() {
     if (xrSession) return;
@@ -229,9 +356,12 @@
       });
       document.body.classList.add("in-xr");
       await renderer.xr.setSession(xrSession);
+      controllers = [attachController(0), attachController(1)];
       xrSession.addEventListener("end", () => {
         document.body.classList.remove("in-xr");
         xrSession = null;
+        controllers.forEach(c => scene.remove(c));
+        controllers = [];
         $("vr-enter-btn").querySelector(".vr-enter-label").textContent = "Enter VR";
       });
       $("vr-enter-btn").querySelector(".vr-enter-label").textContent = "Exit VR";
@@ -240,39 +370,86 @@
     }
   }
 
-  // ---- Mouse-orbit controls for the non-VR preview ----
-  // Lightweight inline implementation; we don't want to vendor OrbitControls
-  // for just this one page. Drag rotates the globe group; scroll zooms the
-  // camera along its forward axis.
+  const xrRaycaster = new THREE.Raycaster();
+  const xrTmpMat = new THREE.Matrix4();
+  function xrPick(controller) {
+    xrTmpMat.identity().extractRotation(controller.matrixWorld);
+    xrRaycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+    xrRaycaster.ray.direction.set(0, 0, -1).applyMatrix4(xrTmpMat);
+    const hits = xrRaycaster.intersectObjects(beaconsGroup.children, false);
+    const hit = hits.find(h => h.object.userData.feature);
+    if (hit) showDetail(hit.object.userData.feature);
+  }
+
+  // ---------------------------------------------------------------------
+  // Non-VR preview — mouse orbit, scroll zoom, hover tooltip, click detail
+  // ---------------------------------------------------------------------
   let isDragging = false, lastX = 0, lastY = 0;
-  canvas.addEventListener("mousedown", (e) => { isDragging = true; lastX = e.clientX; lastY = e.clientY; lastInteract = performance.now(); });
+  let userInteracting = false;
+  let lastInteract = 0;
+  const AUTO_ROTATE_RESUME_MS = 3500;
+  const AUTO_ROTATE_SPEED = 0.0010;
+
+  canvas.addEventListener("mousedown", (e) => {
+    isDragging = true; lastX = e.clientX; lastY = e.clientY;
+    userInteracting = true; lastInteract = performance.now();
+  });
   window.addEventListener("mouseup", () => { isDragging = false; });
   window.addEventListener("mousemove", (e) => {
-    if (!isDragging) return;
-    const dx = e.clientX - lastX, dy = e.clientY - lastY;
-    lastX = e.clientX; lastY = e.clientY;
-    globeGroup.rotation.y += dx * 0.005;
-    globeGroup.rotation.x += dy * 0.005;
-    globeGroup.rotation.x = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, globeGroup.rotation.x));
-    autoRotate = false;
-    lastInteract = performance.now();
+    if (isDragging) {
+      const dx = e.clientX - lastX, dy = e.clientY - lastY;
+      lastX = e.clientX; lastY = e.clientY;
+      globeGroup.rotation.y += dx * 0.005;
+      globeGroup.rotation.x += dy * 0.005;
+      globeGroup.rotation.x = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, globeGroup.rotation.x));
+      lastInteract = performance.now();
+    }
+    updateHover(e.clientX, e.clientY);
   });
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
-    camera.position.z = Math.max(0.8, Math.min(5, camera.position.z + e.deltaY * 0.003));
+    camera.position.z = Math.max(0.9, Math.min(8, camera.position.z + e.deltaY * 0.003));
     lastInteract = performance.now();
   }, { passive: false });
 
-  // ---- Click on beacon → show detail bubble (preview only) ----
+  // Hover tooltip — DOM element that follows the cursor, shows name + score.
+  const tooltip = document.createElement("div");
+  tooltip.className = "vr-tooltip";
+  tooltip.hidden = true;
+  document.body.appendChild(tooltip);
+
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
+  function updateHover(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObjects(beaconsGroup.children, false);
+    const hit = hits.find(h => h.object.userData.feature);
+    if (hit) {
+      const f = hit.object.userData.feature;
+      const s = (f.properties.risk_score || 0).toFixed(0);
+      const name = f.properties.name || "Unnamed facility";
+      tooltip.innerHTML = `<span class="t">${escapeHtml(name)}</span><span class="s">${s}</span>`;
+      tooltip.style.left = (clientX + 14) + "px";
+      tooltip.style.top = (clientY + 14) + "px";
+      tooltip.hidden = false;
+      canvas.style.cursor = "pointer";
+    } else {
+      tooltip.hidden = true;
+      canvas.style.cursor = isDragging ? "grabbing" : "grab";
+    }
+  }
+  canvas.addEventListener("mouseleave", () => { tooltip.hidden = true; });
+
   canvas.addEventListener("click", (e) => {
     const rect = canvas.getBoundingClientRect();
     pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(pointer, camera);
-    const intersects = raycaster.intersectObjects(beaconsGroup.children, false);
-    const hit = intersects.find(i => i.object.userData.feature);
+    const hits = raycaster.intersectObjects(beaconsGroup.children, false);
+    const hit = hits.find(h => h.object.userData.feature);
     if (hit) showDetail(hit.object.userData.feature);
   });
 
@@ -299,12 +476,16 @@
     return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
-  // ---- Country picker ----
+  // ---------------------------------------------------------------------
+  // Country picker
+  // ---------------------------------------------------------------------
   document.querySelectorAll(".vr-country").forEach(b => {
     b.addEventListener("click", () => loadCountry(b.dataset.iso));
   });
 
-  // ---- Resize ----
+  // ---------------------------------------------------------------------
+  // Resize
+  // ---------------------------------------------------------------------
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -312,16 +493,48 @@
   });
   renderer.setSize(window.innerWidth, window.innerHeight, false);
 
-  // ---- Render loop ----
+  // ---------------------------------------------------------------------
+  // Camera intro animation (fly from CAM_INTRO -> CAM_HOME)
+  // ---------------------------------------------------------------------
+  const INTRO_MS = 2200;
+  const introStart = performance.now();
+  function runIntro(now) {
+    const t = Math.min((now - introStart) / INTRO_MS, 1);
+    const eased = 1 - Math.pow(1 - t, 3);
+    camera.position.lerpVectors(CAM_INTRO, CAM_HOME, eased);
+    camera.lookAt(0, 1.0, 0);
+    return t < 1;
+  }
+
+  // ---------------------------------------------------------------------
+  // Render loop
+  // ---------------------------------------------------------------------
   renderer.setAnimationLoop((time, frame) => {
-    if (autoRotate || (performance.now() - lastInteract > AUTO_ROTATE_RESUME_MS)) {
-      autoRotate = true;
+    // Intro
+    if (introStart > 0 && runIntro(performance.now())) {
+      // still running
+    }
+
+    // Auto-rotate when idle
+    if (!userInteracting || (performance.now() - lastInteract > AUTO_ROTATE_RESUME_MS)) {
+      userInteracting = false;
       globeGroup.rotation.y += AUTO_ROTATE_SPEED;
     }
+
+    // Severe-band beacon pulse
+    const tNow = performance.now() * 0.001;
+    for (const m of pulsingBeacons) {
+      const pulse = 0.85 + 0.15 * Math.sin(tNow * 2.2);
+      m.scale.setScalar(m.userData.baseScale * pulse);
+      m.material.opacity = m.userData.baseOpacity * (0.75 + 0.25 * Math.sin(tNow * 2.2));
+    }
+
     renderer.render(scene, camera);
   });
 
-  // ---- Init ----
+  // ---------------------------------------------------------------------
+  // Init
+  // ---------------------------------------------------------------------
   setupXrButton();
   loadCountry(currentIso);
 })();
