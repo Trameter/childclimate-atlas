@@ -1788,3 +1788,18 @@ body:not(.hazards-on) .hud-year-row {
   0%, 100% { opacity: 0.5; }
   50%      { opacity: 1; }
 }
+
+
+/* The top-HUD hazards chip is click-to-toggle — same state as the
+   sidebar 'Hazards' export button, but a subtle text toggle instead
+   of a styled button. No background shift on hover (we don't want it
+   to look like a button); just a slight ember tint on the text and a
+   pointer cursor to say 'this flips.' */
+#hud-heatmap {
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+#hud-heatmap:hover {
+  color: var(--ember);
+  border-color: var(--paper-soft);
+}

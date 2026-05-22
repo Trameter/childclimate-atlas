@@ -3239,6 +3239,11 @@ function printSummary() {
 document.addEventListener("DOMContentLoaded", () => {
   const heatBtn = document.getElementById("btn-heatmap");
   if (heatBtn) heatBtn.addEventListener("click", toggleHeatmap);
+  // Top HUD chip is also a click-to-toggle — same state, just a faster
+  // way to flip hazards without traveling to the sidebar button. Plain
+  // text styling (no button affordance), cursor signals it's clickable.
+  const hudHeat = document.getElementById("hud-heatmap");
+  if (hudHeat) hudHeat.addEventListener("click", toggleHeatmap);
   document.querySelectorAll(".year-chip").forEach(el => {
     el.addEventListener("click", () => setProjectionYear(parseInt(el.dataset.year, 10)));
   });
