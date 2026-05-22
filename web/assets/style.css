@@ -1665,8 +1665,19 @@ body.mobile-menu-open .mobile-menu-btn .mm-bars::after  { top: 0; transform: rot
   border: 1px solid var(--rule);
   border-radius: 2px;
   padding: 3px 8px;
+  /* Fixed min-width so 'Today' (5 char) doesn't make the row wider than
+     '2030' / '2050' (4 char) — otherwise clicking back and forth shifts
+     the layout. */
+  min-width: 48px;
+  text-align: center;
   cursor: pointer;
-  transition: color 0.12s, border-color 0.12s, background 0.12s;
+  transition: color 0.12s, border-color 0.12s, background 0.12s, opacity 0.18s;
+}
+/* Year chips visually indicate they only have effect when hazards is on.
+   When the hazards button isn't active, the row dims to ~55% opacity. */
+.hud-year-row:has(~ #hud-heatmap:not(.has-hazards)),
+body:not(.hazards-on) .hud-year-row {
+  opacity: 0.55;
 }
 .year-chip:hover { color: var(--paper); border-color: var(--paper-soft); }
 .year-chip.active {
@@ -1719,4 +1730,29 @@ body.mobile-menu-open .mobile-menu-btn .mm-bars::after  { top: 0; transform: rot
   padding: 2px 6px;
   border-radius: 2px;
   pointer-events: none;
+}
+
+
+/* ---- 'View on Google Maps' link overlay on satellite thumbnail ---- */
+.detail-satellite-link {
+  position: absolute;
+  top: 8px; right: 8px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--paper);
+  background: rgba(8, 10, 18, 0.78);
+  border: 1px solid rgba(250, 248, 244, 0.16);
+  padding: 4px 9px;
+  border-radius: 2px;
+  text-decoration: none;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.detail-satellite-link:hover {
+  color: var(--ink);
+  background: var(--ember);
+  border-color: var(--ember);
 }

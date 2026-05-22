@@ -698,31 +698,14 @@ function buildSpotlightQueue() {
   // whatever the user is looking at (country switch, state filter, etc.).
   if (!filteredFeatures || filteredFeatures.length === 0) return [];
 
-  // Multi-country mode: interleave top-N from each country so the tour
-  // bounces BGD -> NGA -> GTM and tells a global story instead of
-  // dwelling on whichever country happens to have the highest scores.
-  // (BGD currently dominates: top 77.8 vs NGA 75.3 vs GTM 72.5.)
-  const hasMulti = IS_3D && filteredFeatures.some(f => f.properties._iso3);
-  if (hasMulti) {
-    const order = ["BGD", "NGA", "GTM"];
-    const perCountry = {};
-    for (const iso of order) {
-      const fs = filteredFeatures
-        .filter(f => f.properties._iso3 === iso)
-        .sort((a, b) => b.properties.risk_score - a.properties.risk_score);
-      perCountry[iso] = fs.slice(0, 3);  // top 3 per country = 9 stops
-    }
-    const interleaved = [];
-    for (let i = 0; i < 3; i++) {
-      for (const iso of order) {
-        if (perCountry[iso][i]) interleaved.push(perCountry[iso][i]);
-      }
-    }
-    if (interleaved.length > 0) return interleaved;
-    // Fall through to single-country path if no _iso3 tags found
-  }
-
-  const sorted = [...filteredFeatures].sort(
+  // Spotlight respects the active country. If the user picked Nigeria on
+  // the left, the tour stays in Nigeria — bouncing to Bangladesh would
+  // ignore that choice. Filter filteredFeatures to active-country only
+  // before picking the top-N.
+  const scoped = IS_3D
+    ? filteredFeatures.filter(f => !f.properties._iso3 || f.properties._iso3 === _currentCountryIso)
+    : filteredFeatures;
+  const sorted = [...scoped].sort(
     (a, b) => b.properties.risk_score - a.properties.risk_score
   );
   const top = sorted.slice(0, SPOTLIGHT_TOP_N);
@@ -919,9 +902,6 @@ function visitNextSpotlightStop() {
   hideSpotlightPopup();
   const f = spotlightQueue[spotlightIdx];
   const [lng, lat] = f.geometry.coordinates;
-  // Auto-switch active country if this stop is in a different country —
-  // narrative beat: 'now we are in Nigeria, now in Bangladesh.'
-  if (f.properties._iso3) setActiveCountryQuietly(f.properties._iso3);
 
   // Distance-aware pacing. Squared degree distance between current camera
   // center and the target. Cheap enough to compute per stop, no need for
@@ -2050,12 +2030,13 @@ function renderDetail(feature) {
     </div>
 
     <!-- Satellite imagery from ESRI World_Imagery REST endpoint, centred
-         on the facility's lat/lng with ~600m padding. Loads on demand on
-         each detail open; onerror hides the block so a missing tile
-         doesn't leave a broken-image placeholder. -->
+         on the facility's lat/lng. The link overlay opens Google Maps at
+         the same coordinates so the user can zoom + pan + street-view if
+         the thumbnail piques their interest. -->
     <div class="detail-satellite" id="detail-satellite">
       <img id="detail-satellite-img" alt="Satellite view of the facility's location" />
       <div class="detail-satellite-pin" aria-hidden="true"></div>
+      <a id="detail-satellite-link" class="detail-satellite-link" target="_blank" rel="noopener" title="Open this location in Google Maps">View on Google Maps →</a>
       <div class="detail-satellite-attr mono">Satellite · Esri / Maxar</div>
     </div>
 
@@ -2113,6 +2094,12 @@ function renderDetail(feature) {
     const url = `https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export?bbox=${w},${s},${e},${n}&size=480,240&format=jpg&bboxSR=4326&imageSR=3857&f=image`;
     img.onerror = () => { wrap.style.display = "none"; };
     img.src = url;
+    const link = document.getElementById("detail-satellite-link");
+    if (link) {
+      // Google Maps Search API — opens a map centred on the lat/lng with
+      // a pin. User can then zoom/pan/street-view however they want.
+      link.href = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+    }
   })();
 
   // Spin up the micro-scene now that the canvas is in the DOM with its
@@ -2991,6 +2978,10 @@ function ensureHazardLayers() {
 
 function toggleHeatmap() {
   heatmapVisible = !heatmapVisible;
+  // Body class lets the CSS dim the year-chip row when hazards is off
+  // (the chips don't have any visual effect without hazards on, so we
+  // signal that visually rather than disabling them outright).
+  document.body.classList.toggle("hazards-on", heatmapVisible);
   const btn = document.getElementById("btn-heatmap");
   const hud = document.getElementById("hud-heatmap");
   if (heatmapVisible) {
@@ -3037,12 +3028,12 @@ function setProjectionYear(year) {
   document.querySelectorAll(".year-chip").forEach(el => {
     el.classList.toggle("active", parseInt(el.dataset.year, 10) === year);
   });
-  // Auto-enable hazards on ANY chip click. Previous logic only fired for
-  // future years which meant clicking "Today" silently did nothing —
-  // user-confusing dead state.
-  if (!heatmapVisible) {
-    toggleHeatmap();
-  } else {
+  // Year chips only affect the visualization WHEN hazards are on. We used
+  // to auto-enable hazards on year click, but that meant the user picked
+  // a year and the app silently turned a feature on without asking. Now:
+  // if hazards are on, the projection multipliers re-render. If hazards
+  // are off, the year is recorded but nothing flips on visually.
+  if (heatmapVisible) {
     updateHazardWeights();
     const hud = document.getElementById("hud-heatmap");
     if (hud) hud.textContent = `Hazards · on (${year === 2024 ? "Today" : year})`;
