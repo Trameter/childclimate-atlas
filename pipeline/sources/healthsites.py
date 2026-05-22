@@ -128,9 +128,17 @@ def _normalize(records: List[Dict]) -> List[Dict]:
 
 
 class KeyNotActive(Exception):
-    """Healthsites returned 401/403 — key is invalid or awaiting admin approval.
-    Signals the caller to abort pagination immediately rather than burn
-    retries; no amount of waiting will fix this within a single build."""
+    """Healthsites returned 401/403 with an auth/approval problem — key is
+    invalid or awaiting admin approval. Signals the caller to abort the
+    whole fetch and DISCARD partial data (there is no partial data — we
+    failed on page 1)."""
+
+
+class DailyCapExhausted(Exception):
+    """Healthsites returned 403 with a 'too many requests today' message.
+    Distinct from KeyNotActive because the key IS valid and we may have
+    already accumulated many pages of data — the caller should KEEP those,
+    just stop paginating. Resets the next calendar day per Healthsites."""
 
 
 def _request_page(country_name: str, page: int, api_key: str) -> List[Dict]:
@@ -151,14 +159,26 @@ def _request_page(country_name: str, page: int, api_key: str) -> List[Dict]:
                 # Past last page — Healthsites returns 404 for empty pages.
                 return []
             if r.status_code in (401, 403):
-                # Key invalid OR awaiting admin approval. Either way, no
-                # value in retrying — abort the whole fetch cleanly so the
-                # OSM-only pipeline can continue.
+                # 403 from Healthsites covers THREE different conditions
+                # and we have to peek at the body to know which:
+                #   1. Key invalid              → abort, no partial data
+                #   2. Awaiting admin approval  → abort, no partial data
+                #   3. Daily request cap hit    → STOP, but caller keeps
+                #                                 whatever pages already
+                #                                 accumulated. If we
+                #                                 discard them, that's
+                #                                 4,000 NGA records gone
+                #                                 (the actual outage from
+                #                                 the v0.5 first run).
                 detail = ""
                 try:
                     detail = r.json().get("detail", "")
                 except Exception:
-                    detail = r.text[:120]
+                    detail = r.text[:200]
+                lowered = (detail or "").lower()
+                if ("limit" in lowered and ("per day" in lowered or "today" in lowered)) \
+                        or "daily" in lowered:
+                    raise DailyCapExhausted(detail or f"HTTP {r.status_code}")
                 raise KeyNotActive(detail or f"HTTP {r.status_code}")
             if r.status_code == 429:
                 wait = 10 * (attempt + 1)
@@ -208,24 +228,24 @@ def fetch(config, cache: bool = True) -> List[Dict]:
     for page in range(1, MAX_PAGES + 1):
         try:
             records = _request_page(country_name, page, api_key)
+        except DailyCapExhausted as e:
+            # Daily request cap hit mid-pagination (Healthsites free tier is
+            # 50/day). KEEP the pages already accumulated — they get
+            # normalized + cached + returned below. Without this branch,
+            # the NGA pull on 2026-05-22 would discard 4,000 records.
+            print(f"  [healthsites] daily cap hit on page {page} — keeping {len(all_records)} records collected so far ({e})", flush=True)
+            quota_exhausted_mid_pull = True
+            break
         except KeyNotActive as e:
-            # Two reasons we land here:
-            #  1. Key never approved / invalid → no records collected yet,
-            #     return [] and skip caching so the next build can retry.
-            #  2. Daily request cap hit mid-pagination (Healthsites free
-            #     tier is 50/day) → KEEP partial records collected so far.
-            #     Tomorrow's build picks up where we left off using the
-            #     pagination-resume hook below (we cache by country, the
-            #     cache check at the top of fetch() will return on a hit).
-            err_msg = str(e).lower()
-            if "limit" in err_msg and "day" in err_msg and all_records:
-                print(f"  [healthsites] daily cap hit after page {page-1} — keeping {len(all_records)} records collected so far ({e})", flush=True)
-                quota_exhausted_mid_pull = True
-                break
+            # Key never approved or invalid — no records collected yet.
+            # Return [] and skip caching so the next build can retry once
+            # admin approval lands.
             print(f"  [healthsites] key not active — skipping Healthsites enrichment ({e})", flush=True)
             return []
         except RuntimeError as e:
-            print(f"  [healthsites] {e} — stopping pagination", flush=True)
+            # Network retries exhausted on a specific page. Better to keep
+            # the pages we did collect than throw the whole pull away.
+            print(f"  [healthsites] {e} — stopping pagination, keeping {len(all_records)} records", flush=True)
             break
         if not records:
             # Empty page = past the end (Healthsites returns [] OR 404 there).
