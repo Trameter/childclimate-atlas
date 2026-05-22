@@ -1929,22 +1929,37 @@ function setupDetailMinimap(feature) {
       style: {
         version: 8,
         sources: {
-          "voyager-tiles": {
+          // Satellite base — ESRI World_Imagery, free for embedding with
+          // attribution. Gives the 'Google Maps satellite view' feel:
+          // you see the actual building, roof, courtyard, road network.
+          "esri-sat": {
             type: "raster",
-            tiles: [
-              "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-              "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-              "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-              "https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-            ],
+            tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
             tileSize: 256,
-            attribution: "© OpenStreetMap · © CARTO",
+            maxzoom: 19,
+            attribution: "© Esri · Maxar · Earthstar Geographics",
+          },
+          // Reference labels overlay (transparent background; just place
+          // names + admin boundaries). Layered on top of satellite to
+          // match the 'hybrid' style of Google Maps satellite view.
+          "esri-labels": {
+            type: "raster",
+            tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"],
+            tileSize: 256,
+            maxzoom: 19,
           },
         },
-        layers: [{ id: "voyager-base", type: "raster", source: "voyager-tiles" }],
+        layers: [
+          { id: "sat-base",    type: "raster", source: "esri-sat" },
+          { id: "sat-labels",  type: "raster", source: "esri-labels" },
+        ],
       },
       center: [lng, lat],
-      zoom: 15,
+      // Zoom 17 = roughly the level where you can identify the facility
+      // building, its courtyard, the road in front. Tighter than the
+      // previous 15 (which was 'block-level'). User can zoom out for
+      // wider context via the inline +/- controls.
+      zoom: 17,
       attributionControl: false,
       cooperativeGestures: false,
     });
@@ -1957,7 +1972,7 @@ function setupDetailMinimap(feature) {
     // correct dimensions instead of the initial 0×0 placeholder.
     setTimeout(() => _detailMinimap?.resize(), 320);
   } else {
-    _detailMinimap.flyTo({ center: [lng, lat], zoom: 15, duration: 600 });
+    _detailMinimap.flyTo({ center: [lng, lat], zoom: 17, duration: 600 });
     _detailMinimapMarker?.setLngLat([lng, lat]);
   }
 }
@@ -2105,7 +2120,7 @@ function renderDetail(feature) {
     <div class="detail-minimap-wrap">
       <div class="detail-minimap" id="detail-minimap"></div>
       <a id="detail-map-link" class="detail-satellite-link" target="_blank" rel="noopener" title="Open this location in Google Maps">View on Google Maps →</a>
-      <div class="detail-satellite-attr mono">© OSM · CARTO</div>
+      <div class="detail-satellite-attr mono">© Esri · Maxar</div>
     </div>
 
     <!-- Micro-scene: a small Three.js vignette that procedurally visualises
