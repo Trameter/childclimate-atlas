@@ -1667,8 +1667,8 @@ body.mobile-menu-open .mobile-menu-btn .mm-bars::after  { top: 0; transform: rot
   padding: 3px 8px;
   /* Fixed min-width so 'Today' (5 char) doesn't make the row wider than
      '2030' / '2050' (4 char) — otherwise clicking back and forth shifts
-     the layout. */
-  min-width: 48px;
+     the layout. 60px covers 'Today' at the current font + padding. */
+  min-width: 60px;
   text-align: center;
   cursor: pointer;
   transition: color 0.12s, border-color 0.12s, background 0.12s, opacity 0.18s;

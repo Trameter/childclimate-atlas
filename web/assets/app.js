@@ -553,6 +553,10 @@ function computeSubsolarPoint() {
 
 function addSunMarker() {
   if (map.getSource("sun-marker")) return;
+  if (!map.isStyleLoaded()) {
+    map.once("idle", addSunMarker);
+    return;
+  }
   map.addSource("sun-marker", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   // Outer halo — soft and wide.
   map.addLayer({
@@ -2943,6 +2947,13 @@ function setFacilityLayersVisible(visible) {
 }
 
 function ensureHazardLayers() {
+  // Guard against the style not being fully loaded — addLayer throws
+  // 'Style is not done loading' otherwise. If we're early, defer to
+  // map.once('idle') so the user's click eventually takes effect.
+  if (!map.isStyleLoaded()) {
+    map.once("idle", () => { if (heatmapVisible) ensureHazardLayers(); });
+    return;
+  }
   for (const h of HAZARD_LAYERS) {
     if (map.getLayer(h.id)) continue;
     const colorExpr = ["interpolate", ["linear"], ["heatmap-density"]];
