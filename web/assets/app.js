@@ -15,6 +15,7 @@ const VIEWS = {
   BGD: { center: [90.3, 23.7], zoom: 6.8 },    // full Bangladesh
   GTM: { center: [-90.2, 15.8], zoom: 7.2 },   // full Guatemala
   KEN: { center: [37.9, 0.2], zoom: 5.8 },     // full Kenya
+  PHL: { center: [122.5, 12.0], zoom: 5.2 },   // full Philippines archipelago
 };
 
 // Display name for each country so we can update the UI synchronously on
@@ -24,6 +25,7 @@ const COUNTRY_NAMES = {
   BGD: "Bangladesh",
   GTM: "Guatemala",
   KEN: "Kenya",
+  PHL: "Philippines",
 };
 
 // Country aura tint — a soft, wide, blurred glow drawn under the dots on
@@ -31,10 +33,11 @@ const COUNTRY_NAMES = {
 // can FEEL the difference between countries before reading a single number.
 // Picked to harmonize with the design tokens (--ember, --mod) rather than
 // invent new hues:
-//   Nigeria (NGA)    — heat + dust + drought          → warm ember
-//   Bangladesh (BGD) — flood + monsoon humidity       → cool desaturated cyan
-//   Guatemala (GTM)  — storms + landslides + mixed    → warm amber
-//   Kenya (KEN)      — drought + arid lands           → dry savanna gold
+//   Nigeria (NGA)     — heat + dust + drought          → warm ember
+//   Bangladesh (BGD)  — flood + monsoon humidity       → cool desaturated cyan
+//   Guatemala (GTM)   — storms + landslides + mixed    → warm amber
+//   Kenya (KEN)       — drought + arid lands           → dry savanna gold
+//   Philippines (PHL) — typhoons + sea + monsoon       → ocean teal
 // Subtle by design: opacity tapers to zero as the user zooms in, so the
 // effect lives at globe-view altitudes and never competes with dots at the
 // facility level.
@@ -43,6 +46,7 @@ const COUNTRY_AURA_COLORS = {
   BGD: "#5FA5C7",  // cool cyan — flood-dominant
   GTM: "#D9A655",  // amber — storm-dominant
   KEN: "#C99548",  // dry savanna gold — drought-dominant
+  PHL: "#4F9BA8",  // ocean teal — typhoon + monsoon dominant
 };
 
 // ---- helpers ----
@@ -165,7 +169,7 @@ let activeFilters = { types: new Set(["clinic", "hospital", "school"]), bands: n
 //
 // On /2d we keep the single-country flow to avoid scattering dots across
 // the world on a flat map (visually meaningless).
-const ALL_ISOS = ["NGA", "BGD", "GTM", "KEN"];
+const ALL_ISOS = ["NGA", "BGD", "GTM", "KEN", "PHL"];
 const countryDataByIso = {};   // iso -> raw geojson data
 let allCountriesLoaded = false;
 
@@ -3335,7 +3339,7 @@ document.addEventListener("click", (e) => {
 // from the landing URL if present + valid, otherwise NGA. The country
 // <select> is set to match so the dropdown reflects what's loading.
 (() => {
-  const validCountries = Object.keys(VIEWS);  // ["NGA", "BGD", "GTM"]
+  const validCountries = Object.keys(VIEWS);  // NGA, BGD, GTM, KEN, PHL
   const fromUrl = _initialUrl.country;
   const iso = fromUrl && validCountries.includes(fromUrl) ? fromUrl : "NGA";
   const sel = document.getElementById("country");

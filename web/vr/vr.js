@@ -25,10 +25,11 @@
   const $ = (id) => document.getElementById(id);
 
   const COUNTRY_CENTER = {
-    NGA: { lat: 9.1,  lng: 8.7,   name: "Nigeria"    },
-    BGD: { lat: 23.7, lng: 90.3,  name: "Bangladesh" },
-    GTM: { lat: 15.8, lng: -90.2, name: "Guatemala"  },
-    KEN: { lat: 0.2,  lng: 37.9,  name: "Kenya"      },
+    NGA: { lat: 9.1,  lng: 8.7,   name: "Nigeria"     },
+    BGD: { lat: 23.7, lng: 90.3,  name: "Bangladesh"  },
+    GTM: { lat: 15.8, lng: -90.2, name: "Guatemala"   },
+    KEN: { lat: 0.2,  lng: 37.9,  name: "Kenya"       },
+    PHL: { lat: 12.0, lng: 122.5, name: "Philippines" },
   };
   const ISOS = Object.keys(COUNTRY_CENTER);
 
@@ -164,6 +165,7 @@
     BGD: 0x5FA5C7,   // cool cyan      — flood-dominant
     GTM: 0xD9A655,   // amber          — heat + drought
     KEN: 0xC99548,   // dry savanna    — drought-dominant
+    PHL: 0x4F9BA8,   // ocean teal     — typhoon + monsoon
   };
   function buildCountryBorders() {
     const data = (typeof window !== "undefined") ? window.COUNTRY_BORDERS : null;
@@ -1065,11 +1067,10 @@
       );
       perCountry[iso] = sorted.slice(0, TOUR_STOPS_PER_COUNTRY);
     }
-    // Interleave: BGD-NGA-GTM-KEN round-robin. BGD first because its
+    // Interleave round-robin: BGD-NGA-GTM-KEN-PHL. BGD first because its
     // severe band is best-populated proportionally, sets the bar high
-    // for the rest. KEN slotted last in the rotation because its severe
-    // tier is the newest and we want the warm-up to land on Bangladesh.
-    const order = ["BGD", "NGA", "GTM", "KEN"];
+    // for the rest. PHL slotted last as the newest country.
+    const order = ["BGD", "NGA", "GTM", "KEN", "PHL"];
     const stops = [];
     for (let i = 0; i < TOUR_STOPS_PER_COUNTRY; i++) {
       for (const iso of order) {

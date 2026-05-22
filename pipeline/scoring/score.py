@@ -124,9 +124,35 @@ def score_facility(
     }
 
     raw = sum(weights[k] * components[k] for k in weights)
-    score = round(max(0.0, min(100.0, 100.0 * raw)), 1)
+
+    # Concentration bonus (v0.6) — surfaces facilities where ONE hazard is
+    # extreme even if the others aren't. Without this, the pure additive
+    # model misses monospecific extreme sites: KEN's Marsabit / Garissa /
+    # Wajir schools post heat-index days >= 270/yr (heat subscore = 1.0)
+    # and 90+ day dry runs (drought subscore = 0.81) but have negligible
+    # flood + air pollution. The additive sum tops out around 70 — they
+    # never reach SEVERE despite being unmistakably extreme on the two
+    # hazards that actually apply to them.
+    #
+    # Formula: bonus = 0.10 * max_hazard * (max_hazard - mean_hazard)
+    # - Big when ONE hazard dominates (KEN ASAL: 1.0 * (1.0 - 0.45) = 0.55)
+    # - Small when hazards are evenly high (broadly-high site, near zero)
+    # - Zero when no hazard is elevated
+    # Only the 4 environmental hazards count, not vulnerability multipliers
+    # (child_density, facility_fragility don't make a place "worse" — they
+    # amplify exposure to actual hazards).
+    HAZARD_KEYS = ("heat_exposure", "air_pollution", "flood_risk", "drought_risk")
+    haz = [components[k] for k in HAZARD_KEYS]
+    max_haz = max(haz)
+    mean_haz = sum(haz) / len(haz)
+    concentration_bonus = 0.10 * max_haz * (max_haz - mean_haz)
+    raw_with_bonus = raw + concentration_bonus
+
+    score = round(max(0.0, min(100.0, 100.0 * raw_with_bonus)), 1)
 
     # Top 3 contributing components (for the "why" explanation in the UI).
+    # Concentration bonus listed separately so the UI can flag "this site
+    # is severe because of a single extreme hazard" vs "stacked hazards".
     contributions = sorted(
         (
             (k, round(100.0 * weights[k] * components[k], 1))
@@ -141,6 +167,7 @@ def score_facility(
         "components": {k: round(v, 3) for k, v in components.items()},
         "contributions": contributions,
         "top_drivers": [k for k, _ in contributions[:3]],
+        "concentration_bonus": round(100.0 * concentration_bonus, 2),
     }
 
 

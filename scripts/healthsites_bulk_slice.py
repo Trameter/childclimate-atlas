@@ -39,7 +39,7 @@ from pipeline.config import load_country  # noqa: E402
 from pipeline.sources.healthsites import _normalize  # noqa: E402
 
 BULK_ZIP = ROOT / "data" / "raw" / "healthsites" / "World.zip"
-COUNTRY_ISOS = ["NGA", "BGD", "GTM", "KEN"]
+COUNTRY_ISOS = ["NGA", "BGD", "GTM", "KEN", "PHL"]
 PROGRESS_EVERY = 100_000
 
 

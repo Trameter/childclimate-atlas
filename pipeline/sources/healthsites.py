@@ -47,6 +47,7 @@ ISO3_TO_HEALTHSITES_NAME = {
     "BGD": "Bangladesh",
     "GTM": "Guatemala",
     "KEN": "Kenya",
+    "PHL": "Philippines",
 }
 
 # Map raw Healthsites tag values to our three internal facility_type categories.
