@@ -1166,8 +1166,24 @@ const PULSE_LAYER_ID = "facilities-pulse";
 const PULSE_THRESHOLD = 73;       // risk_score threshold; raise to 75 post-rerun
 const PULSE_PERIOD_SEC = 2.4;     // one full breath in/out
 let pulseRafId = null;
+let pulseEnabled = true;          // default ON; user can toggle via HUD chip
+
+// Public toggle — flips pulseEnabled, adds or removes the layer + animation
+// and updates the HUD button's text. Plain text 'ON' / 'OFF' inside the chip;
+// no color or background change, just the word flips.
+function togglePulseLayer() {
+  pulseEnabled = !pulseEnabled;
+  if (pulseEnabled) {
+    setupPulseLayer();
+  } else {
+    teardownPulseLayer();
+  }
+  const btn = document.getElementById("hud-pulse-toggle");
+  if (btn) btn.textContent = pulseEnabled ? "ON" : "OFF";
+}
 
 function setupPulseLayer() {
+  if (!pulseEnabled) return;                       // user has turned it off
   if (!map.getSource("facilities")) return;        // data hasn't loaded yet
   if (map.getLayer(PULSE_LAYER_ID)) return;        // already added
   map.addLayer({
@@ -3239,11 +3255,11 @@ function printSummary() {
 document.addEventListener("DOMContentLoaded", () => {
   const heatBtn = document.getElementById("btn-heatmap");
   if (heatBtn) heatBtn.addEventListener("click", toggleHeatmap);
-  // Top HUD chip is also a click-to-toggle — same state, just a faster
-  // way to flip hazards without traveling to the sidebar button. Plain
-  // text styling (no button affordance), cursor signals it's clickable.
-  const hudHeat = document.getElementById("hud-heatmap");
-  if (hudHeat) hudHeat.addEventListener("click", toggleHeatmap);
+  // Top-HUD 'Pulse · ON' chip — the ON/OFF text inside is the only
+  // clickable part. Toggles the severe-band breathing-ring layer
+  // without touching the hazards/year state at all. Independent feature.
+  const pulseToggle = document.getElementById("hud-pulse-toggle");
+  if (pulseToggle) pulseToggle.addEventListener("click", () => togglePulseLayer());
   document.querySelectorAll(".year-chip").forEach(el => {
     el.addEventListener("click", () => setProjectionYear(parseInt(el.dataset.year, 10)));
   });

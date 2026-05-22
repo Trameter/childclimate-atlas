@@ -1790,16 +1790,23 @@ body:not(.hazards-on) .hud-year-row {
 }
 
 
-/* The top-HUD hazards chip is click-to-toggle — same state as the
-   sidebar 'Hazards' export button, but a subtle text toggle instead
-   of a styled button. No background shift on hover (we don't want it
-   to look like a button); just a slight ember tint on the text and a
-   pointer cursor to say 'this flips.' */
-#hud-heatmap {
+/* The top-HUD Pulse chip is visible only in 3D — the breathing
+   severe-band rings are a 3D-globe storytelling beat and would have
+   no meaningful sibling on the flat 2D map. The chip's container is
+   plain text; only the inner 'ON' / 'OFF' word is clickable. */
+body:not(.is-3d) #hud-pulse {
+  display: none;
+}
+.hud-toggle {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
   cursor: pointer;
-  transition: color 0.12s, border-color 0.12s;
+  transition: color 0.12s;
 }
-#hud-heatmap:hover {
-  color: var(--ember);
-  border-color: var(--paper-soft);
-}
+.hud-toggle:hover { color: var(--ember); }
