@@ -1673,11 +1673,13 @@ body.mobile-menu-open .mobile-menu-btn .mm-bars::after  { top: 0; transform: rot
   cursor: pointer;
   transition: color 0.12s, border-color 0.12s, background 0.12s, opacity 0.18s;
 }
-/* Year chips are always fully visible regardless of hazards state.
-   The previous dim-when-hazards-off pattern read as 'disabled' which
-   was confusing — users assumed they were broken. Now: clicking any
-   year sets the projection state silently; toggling hazards on
-   visualises the chosen year's overlay. */
+/* Year chips are conditional on hazards being on — the row hides
+   entirely when hazards is off, appears the moment hazards toggle on.
+   Cleaner than the previous fake-disabled-via-dim pattern, since the
+   chips genuinely have no purpose without hazards visualised. */
+body:not(.hazards-on) .hud-year-row {
+  display: none;
+}
 .year-chip:hover { color: var(--paper); border-color: var(--paper-soft); }
 .year-chip.active {
   color: var(--ink);
