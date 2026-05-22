@@ -8,7 +8,7 @@
        a bright strip above the page on platforms that respect it. -->
   <meta name="theme-color" content="#181E2D" />
   <title>ChildClimate Atlas — Immersive 3D · Trameter</title>
-  <meta name="description" content="Walk through 62,817 schools and clinics across Nigeria, Bangladesh, and Guatemala on a 3D globe. Climate-risk scoring for every facility. An open-source Trameter project." />
+  <meta name="description" content="Walk through 74,939 schools and clinics across Nigeria, Bangladesh, Guatemala, and Kenya on a 3D globe. Climate-risk scoring for every facility. An open-source Trameter project." />
   <meta name="google" content="notranslate" />
 
   <!-- Open Graph / social cards. Distinct from the 2D view so a /3d share
@@ -32,8 +32,8 @@
        first paint. crossorigin="anonymous" is required for as="fetch" to
        match the actual fetch() call in JS so the resource isn't re-fetched. -->
   <link rel="preload" href="/data/NGA.geojson" as="fetch" type="application/geo+json" crossorigin="anonymous" />
-  <link rel="stylesheet" href="/assets/vendor/maplibre-gl@5.24.0/maplibre-gl.css?v=1779424735" />
-  <link rel="stylesheet" href="/assets/style.css?v=1779424735" />
+  <link rel="stylesheet" href="/assets/vendor/maplibre-gl@5.24.0/maplibre-gl.css?v=1779430198" />
+  <link rel="stylesheet" href="/assets/style.css?v=1779430198" />
 </head>
 <body class="is-3d">
 
@@ -76,8 +76,8 @@
           <h1>Spin the globe. <em>See the risk.</em></h1>
           <p>Every school and clinic, scored 0–100 for climate risk, on a 3D globe. Click any dot to dive in. Same data, different way to feel it.</p>
           <div class="hero-stats">
-            <div class="hstat"><span class="v">62,817</span><span class="l">Facilities</span></div>
-            <div class="hstat"><span class="v">3</span><span class="l">Countries</span></div>
+            <div class="hstat"><span class="v">74,939</span><span class="l">Facilities</span></div>
+            <div class="hstat"><span class="v">4</span><span class="l">Countries</span></div>
             <div class="hstat"><span class="v">6</span><span class="l">Sub-scores</span></div>
           </div>
         </div>
@@ -104,6 +104,7 @@
                 <option value="NGA">🇳🇬 Nigeria</option>
                 <option value="BGD">🇧🇩 Bangladesh</option>
                 <option value="GTM">🇬🇹 Guatemala</option>
+                <option value="KEN">🇰🇪 Kenya</option>
               </select>
             </div>
           </div>
@@ -240,13 +241,13 @@
   <!-- Mobile drawer backdrop: only visible when body.mobile-menu-open. Clicking it closes the drawer. -->
   <div class="mobile-backdrop" id="mobile-backdrop" aria-hidden="true"></div>
 
-  <script src="/assets/vendor/maplibre-gl@5.24.0/maplibre-gl.js?v=1779424735"></script>
+  <script src="/assets/vendor/maplibre-gl@5.24.0/maplibre-gl.js?v=1779430198"></script>
   <!-- Three.js for the per-facility micro-scene vignettes in the detail
        panel. Self-hosted r149 UMD bundle (MIT) — the last release that
        still ships a stable global-script build, which our CSP
        (script-src 'self') requires. -->
-  <script src="/assets/vendor/three@0.149.0/three.min.js?v=1779424735"></script>
-  <script src="/assets/microscene.js?v=1779424735"></script>
-  <script src="/assets/app.js?v=1779424735"></script>
+  <script src="/assets/vendor/three@0.149.0/three.min.js?v=1779430198"></script>
+  <script src="/assets/microscene.js?v=1779430198"></script>
+  <script src="/assets/app.js?v=1779430198"></script>
 </body>
 </html>

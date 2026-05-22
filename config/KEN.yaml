@@ -1,0 +1,67 @@
+# Kenya — country configuration
+#
+# Added in v0.4 to round out the atlas with East Africa coverage and a
+# DROUGHT-DOMINANT hazard profile, distinct from NGA (heat), BGD (flood),
+# and GTM (heat+drought). Kenya's 2020-2023 Horn of Africa drought left
+# ~5.4M children acutely affected (per UNICEF), making it a strategic
+# storytelling country for the atlas.
+
+country:
+  iso3: KEN
+  iso2: KE
+  name: Kenya
+  capital: Nairobi
+
+# Kenya bbox: ~33.9°E to 41.9°E, -4.7°S to 5.0°N
+bbox: [33.9, -4.7, 41.9, 5.0]
+
+# Demo focus region: Turkana County — northwest, epicenter of the 2020-2023
+# drought and one of the most climate-vulnerable counties in East Africa.
+focus_region:
+  name: "Turkana County"
+  bbox: [34.5, 1.5, 36.5, 5.0]
+
+# Population facts (UN DESA 2024, KNBS 2023 projections)
+population:
+  total_millions: 55
+  under_18_share: 0.42  # Kenya has one of the youngest populations globally
+  under_5_share: 0.13
+
+# Data source toggles
+sources:
+  healthsites: true         # Healthsites.io has strong KEN coverage
+  osm_schools: true
+  open_meteo: true          # ERA5 climate via Open-Meteo
+  air_quality: true         # CAMS regional air-quality
+  worldpop: false           # Disabled in v0.2 across all countries
+  grid3: false              # GRID3 is NGA-specific; no-op elsewhere
+
+# Scoring weights — sum to 1.0
+#
+# Country-specific tune, methodologically consistent with NGA + BGD + GTM:
+# each country lifts its dominant hazards to 0.30 and lowers facility_fragility
+# (the v0.2 OSM-tag heuristic) to 0.05.
+#
+# Kenya is unusual in that the same northern arid/semi-arid lands (ASAL —
+# Marsabit, Garissa, Wajir, Mandera, Turkana) are simultaneously DROUGHT-
+# extreme (94-day dry runs) AND HEAT-extreme (276 heat-index days/yr, even
+# higher than the NGA Sahel argument). Both warrant the 0.30 weighting that
+# the methodology applies to a country's dominant hazard.
+#
+# Air and flood weights drop accordingly: ASAL air is genuinely clean (PM2.5
+# averages 3-5 µg/m³, below the WHO guideline) so air should not dominate
+# scoring; flooding is real but geographically confined to the Tana River
+# basin and parts of the Lake Victoria region, not the country at large.
+#
+# Known scoring limitation: Kenya's worst sites stack only 2 hazards (heat+
+# drought) where NGA stacks 4 (heat+air+child+frag). The additive model caps
+# KEN at ~70 even when both maxed hazards are extreme. v0.5 plans a "single-
+# extreme-hazard" component that would surface such sites as SEVERE without
+# requiring per-country weight gymnastics.
+scoring_weights:
+  heat_exposure: 0.30
+  air_pollution: 0.10
+  flood_risk: 0.10
+  drought_risk: 0.30
+  child_density: 0.15
+  facility_fragility: 0.05

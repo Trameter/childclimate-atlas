@@ -14,6 +14,7 @@ const VIEWS = {
   NGA: { center: [8.7, 9.1], zoom: 5.8 },     // full Nigeria
   BGD: { center: [90.3, 23.7], zoom: 6.8 },    // full Bangladesh
   GTM: { center: [-90.2, 15.8], zoom: 7.2 },   // full Guatemala
+  KEN: { center: [37.9, 0.2], zoom: 5.8 },     // full Kenya
 };
 
 // Display name for each country so we can update the UI synchronously on
@@ -22,6 +23,7 @@ const COUNTRY_NAMES = {
   NGA: "Nigeria",
   BGD: "Bangladesh",
   GTM: "Guatemala",
+  KEN: "Kenya",
 };
 
 // Country aura tint — a soft, wide, blurred glow drawn under the dots on
@@ -32,6 +34,7 @@ const COUNTRY_NAMES = {
 //   Nigeria (NGA)    — heat + dust + drought          → warm ember
 //   Bangladesh (BGD) — flood + monsoon humidity       → cool desaturated cyan
 //   Guatemala (GTM)  — storms + landslides + mixed    → warm amber
+//   Kenya (KEN)      — drought + arid lands           → dry savanna gold
 // Subtle by design: opacity tapers to zero as the user zooms in, so the
 // effect lives at globe-view altitudes and never competes with dots at the
 // facility level.
@@ -39,6 +42,7 @@ const COUNTRY_AURA_COLORS = {
   NGA: "#D87B4F",  // ember — heat-dominant
   BGD: "#5FA5C7",  // cool cyan — flood-dominant
   GTM: "#D9A655",  // amber — storm-dominant
+  KEN: "#C99548",  // dry savanna gold — drought-dominant
 };
 
 // ---- helpers ----
@@ -161,7 +165,7 @@ let activeFilters = { types: new Set(["clinic", "hospital", "school"]), bands: n
 //
 // On /2d we keep the single-country flow to avoid scattering dots across
 // the world on a flat map (visually meaningless).
-const ALL_ISOS = ["NGA", "BGD", "GTM"];
+const ALL_ISOS = ["NGA", "BGD", "GTM", "KEN"];
 const countryDataByIso = {};   // iso -> raw geojson data
 let allCountriesLoaded = false;
 
@@ -314,13 +318,13 @@ async function loadAtlas(iso3, { showProgress = false } = {}) {
 }
 
 // After the first country loads, kick off background prefetches of the
-// other two so subsequent switches are instant. Invoked once from
+// other countries so subsequent switches are instant. Invoked once from
 // switchCountry on the initial load.
 let prefetchedOthers = false;
 function prefetchOtherCountries(currentIso3) {
   if (prefetchedOthers) return;
   prefetchedOthers = true;
-  ["NGA", "BGD", "GTM"].forEach(iso3 => {
+  ALL_ISOS.forEach(iso3 => {
     if (iso3 === currentIso3 || dataCache.has(iso3)) return;
     // Silent background prefetch — no UI progress updates.
     loadAtlas(iso3, { showProgress: false }).catch(() => {});

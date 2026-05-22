@@ -42,10 +42,18 @@ def _overpass_query(bbox: List[float], amenity: str) -> dict:
         south=south, west=west, north=north, east=east,
     )
     # Overpass can be rate-limited; retry with exponential backoff.
+    # Overpass now 406s requests with the default 'python-requests/...' UA
+    # (anti-scraping measure added in 2025/26). A descriptive UA identifies
+    # the project + gives the operators a way to contact us if our load
+    # ever becomes a problem — also it's the Overpass etiquette norm.
+    headers = {
+        "User-Agent": "ChildClimate-Atlas/0.4 (https://climate-atlas.trameter.com)",
+    }
     for attempt in range(5):
         try:
             resp = requests.post(
-                OVERPASS_URL, data={"data": query}, timeout=REQUEST_TIMEOUT
+                OVERPASS_URL, data={"data": query},
+                headers=headers, timeout=REQUEST_TIMEOUT,
             )
             if resp.status_code == 200:
                 return resp.json()
@@ -116,7 +124,15 @@ def fetch(config, cache: bool = True) -> List[Dict]:
     """
     cache_path = config.raw_dir / "facilities.json"
     if cache and cache_path.exists():
-        return json.loads(cache_path.read_text())
+        cached = json.loads(cache_path.read_text())
+        # Don't honor an empty list as a valid cached value — that's almost
+        # always a poisoned cache from a previous Overpass failure (every
+        # tile threw, target_list stayed empty, the wrap got persisted).
+        # Treat empty as cache-miss so the next run actually re-fetches.
+        if cached:
+            return cached
+        print(f"  [facilities] cache at {cache_path} is empty (likely a previous "
+              f"Overpass failure) — ignoring + re-fetching", flush=True)
 
     bbox = config.focus_bbox
     # Split large bboxes into tiles
