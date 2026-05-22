@@ -208,22 +208,22 @@ function buildActiveOpacityExpr(activeIso, baseOpacity) {
   ];
 }
 function applyActiveCountryOpacity(activeIso) {
-  // Only in 3D — in 2D we have a single country loaded so opacity stays
-  // at the base values.
   if (!IS_3D) return;
-  const map_ = window.map;
-  if (!map_) return;
-  // Per-layer base opacity (matches the values defined when each layer
-  // was added in updateMap).
+  // Reading the module-scoped `map`, NOT window.map — browsers auto-expose
+  // <div id="map"> as window.map, which threw TypeError on .getLayer and
+  // killed the rest of updateMap (including the click + hover handler
+  // bindings further down). Layer ids fixed: "hovered-halo" not
+  // "facilities-hovered".
+  if (typeof map === "undefined" || !map.getLayer) return;
   const bases = {
     "facilities-glow":   0.50,
     "facilities":        1.00,
-    "facilities-hovered":0.95,
+    "hovered-halo":      0.95,
     "selected-ring":     1.00,
   };
   for (const [layerId, base] of Object.entries(bases)) {
-    if (!map_.getLayer(layerId)) continue;
-    map_.setPaintProperty(layerId, "circle-opacity", buildActiveOpacityExpr(activeIso, base));
+    if (!map.getLayer(layerId)) continue;
+    map.setPaintProperty(layerId, "circle-opacity", buildActiveOpacityExpr(activeIso, base));
   }
 }
 
@@ -2857,10 +2857,16 @@ let heatmapVisible = false;
 // hazard hotspots will intensify into. Not a downscaled climate model,
 // just defensible regional approximations; the about/methodology page
 // notes this.
+// IPCC AR6 SSP3-7.0 regional approximations vs 2024 baseline. SSP3-7.0
+// is closer to current emissions trajectories than SSP2-4.5 (which the
+// previous values reflected, but at multipliers too subtle to read
+// visually). NOT downscaled climate model output — applied uniformly
+// to all facilities, honest about being v0.2 visualisation rather than
+// peer-reviewed projection. Methodology on the About page.
 const YEAR_MULTIPLIERS = {
   2024: { heat: 1.00, drought: 1.00, flood: 1.00, pm25: 1.00 },
-  2030: { heat: 1.15, drought: 1.10, flood: 1.05, pm25: 1.00 },
-  2050: { heat: 1.40, drought: 1.25, flood: 1.15, pm25: 1.00 },
+  2030: { heat: 1.30, drought: 1.20, flood: 1.10, pm25: 1.00 },
+  2050: { heat: 1.75, drought: 1.50, flood: 1.30, pm25: 1.00 },
 };
 let currentProjectionYear = 2024;
 
@@ -2989,7 +2995,7 @@ function toggleHeatmap() {
     }
     setFacilityLayersVisible(false);
     btn?.classList.add("active");
-    if (hud) hud.textContent = `Hazards · on (${currentProjectionYear})`;
+    if (hud) hud.textContent = `Hazards · on (${currentProjectionYear === 2024 ? "Today" : currentProjectionYear})`;
     if (btn) btn.textContent = "Hide hazards";
   } else {
     for (const h of HAZARD_LAYERS) {
@@ -3025,14 +3031,15 @@ function setProjectionYear(year) {
   document.querySelectorAll(".year-chip").forEach(el => {
     el.classList.toggle("active", parseInt(el.dataset.year, 10) === year);
   });
-  // Auto-enable hazards when stepping into a future year — the projection
-  // is meaningless visually without the overlays on.
-  if (year !== 2024 && !heatmapVisible) {
+  // Auto-enable hazards on ANY chip click. Previous logic only fired for
+  // future years which meant clicking "Today" silently did nothing —
+  // user-confusing dead state.
+  if (!heatmapVisible) {
     toggleHeatmap();
-  } else if (heatmapVisible) {
+  } else {
     updateHazardWeights();
     const hud = document.getElementById("hud-heatmap");
-    if (hud) hud.textContent = `Hazards · on (${year})`;
+    if (hud) hud.textContent = `Hazards · on (${year === 2024 ? "Today" : year})`;
   }
 }
 
