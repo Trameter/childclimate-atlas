@@ -1706,6 +1706,31 @@ body:not(.hazards-on) .hud-year-row {
 .detail-minimap {
   width: 100%;
   height: 100%;
+  /* Sit above the static placeholder img (z-index 0) so the live canvas
+     takes over once MapLibre tiles paint. Position relative is required
+     for the z-index to apply. */
+  position: relative;
+  z-index: 1;
+}
+/* Static ESRI satellite-export image painted instantly behind the
+   MapLibre canvas as a placeholder. Single HTTP request, paints in
+   ~500ms even cold; faded out once MapLibre's tiles are ready. If
+   MapLibre never reaches idle (CDN flake, slow network), this stays
+   visible — so the user always sees the actual location, never an
+   empty grey rectangle. */
+.detail-minimap-placeholder {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+  opacity: 1;
+  transition: opacity 420ms ease-out;
+  pointer-events: none;
+}
+.detail-minimap-placeholder.faded {
+  opacity: 0;
 }
 /* MapLibre nav-control polish to match the panel's design language */
 .detail-minimap .maplibregl-ctrl-group {
@@ -1764,30 +1789,11 @@ body:not(.hazards-on) .hud-year-row {
 }
 
 
-/* ---- Loading state for the detail-panel mini-map ----
-   Shows a subtle pulsing message until ESRI tiles paint. Removed
-   on first 'idle' event; if tiles take >5s the whole wrapper is
-   swapped to a static fallback image (see fallbackToStaticImage). */
-.detail-minimap.loading::before {
-  content: "Loading map…";
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: "JetBrains Mono", monospace;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--paper-soft);
-  background: var(--ink-2);
-  z-index: 1;
-  animation: minimap-loading-pulse 1.6s ease-in-out infinite;
-}
-@keyframes minimap-loading-pulse {
-  0%, 100% { opacity: 0.5; }
-  50%      { opacity: 1; }
-}
+/* Loading-state overlay removed — the static ESRI-export placeholder
+   image (see .detail-minimap-placeholder above) IS the loading state.
+   It paints instantly and stays visible behind the MapLibre canvas
+   until tiles are ready, so an explicit 'Loading map…' message would
+   only obscure the actual location. */
 
 
 /* The top-HUD Pulse chip is visible only in 3D — the breathing

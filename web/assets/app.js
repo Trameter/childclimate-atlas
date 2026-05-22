@@ -1931,30 +1931,43 @@ let _activeMicroScene = null;
 // disposeDetailMinimap() so the WebGL context is released.
 let _detailMinimap = null;
 let _detailMinimapMarker = null;
-let _detailMinimapFallbackTimer = null;
 
-// If ESRI tiles haven't painted within the timeout, swap the whole
-// minimap-wrap with a static fallback image so the user sees SOMETHING.
-// Same ESRI export endpoint we used for the static-thumbnail era —
-// single HTTP request, much more forgiving than the multi-tile fetch.
-function fallbackToStaticImage(lng, lat) {
+// Inject (or refresh) a static ESRI satellite-export image that sits
+// behind the MapLibre canvas as an instant placeholder. Single HTTP
+// request, ~500ms even on cold cache — so the user sees the actual
+// location within one round-trip instead of staring at a grey rectangle
+// while WMS tiles + map style + first paint warm up. The placeholder
+// is faded out once MapLibre reaches 'idle' (its own tiles are ready).
+// If MapLibre never reaches idle (CDN/CSP/network flake), the placeholder
+// stays visible — so the worst case is now 'static image, no zoom controls'
+// rather than 'nothing rendered at all'.
+function ensureMinimapPlaceholder(lng, lat) {
   const wrap = document.querySelector(".detail-minimap-wrap");
   if (!wrap) return;
-  if (_detailMinimap) {
-    _detailMinimap.remove();
-    _detailMinimap = null;
-    _detailMinimapMarker = null;
-  }
   const PAD = 0.0015;
   const w = lng - PAD, e = lng + PAD, s = lat - PAD, n = lat + PAD;
   const url = `https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export?bbox=${w},${s},${e},${n}&size=480,440&format=jpg&bboxSR=4326&imageSR=3857&f=image`;
-  // Replace the interactive map div with a static img + pin marker.
-  wrap.innerHTML = `
-    <img src="${url}" alt="Satellite view" style="display:block;width:100%;height:100%;object-fit:cover" />
-    <div class="detail-satellite-pin" aria-hidden="true"></div>
-    <a class="detail-satellite-link" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${lat},${lng}" title="Open this location in Google Maps">View on Google Maps →</a>
-    <div class="detail-satellite-attr mono">© Esri · Maxar</div>
-  `;
+  let img = wrap.querySelector(".detail-minimap-placeholder");
+  if (!img) {
+    img = document.createElement("img");
+    img.className = "detail-minimap-placeholder";
+    img.alt = "";
+    img.setAttribute("aria-hidden", "true");
+    // Prepend so it renders behind the MapLibre canvas (canvas is later
+    // in DOM order and gets z-index:1 via .detail-minimap CSS).
+    wrap.insertBefore(img, wrap.firstChild);
+  }
+  // Reset the fade state from any previous open, then point at the new
+  // facility's bbox. The browser swaps the displayed image when the new
+  // src finishes downloading; until then the previous image stays put,
+  // which avoids a flash of empty grey between facility opens.
+  img.classList.remove("faded");
+  img.src = url;
+}
+
+function fadeMinimapPlaceholder() {
+  const img = document.querySelector(".detail-minimap-placeholder");
+  if (img) img.classList.add("faded");
 }
 
 function setupDetailMinimap(feature) {
@@ -1964,10 +1977,10 @@ function setupDetailMinimap(feature) {
   const link = document.getElementById("detail-map-link");
   if (link) link.href = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
 
-  // Show a loading state immediately so the user sees feedback while
-  // ESRI's tile CDN spins up. Removed when the map's first tiles paint
-  // or when we fall back to the static image.
-  container.classList.add("loading");
+  // Paint the static placeholder first so the user sees something within
+  // one HTTP round-trip — see ensureMinimapPlaceholder() docstring.
+  ensureMinimapPlaceholder(lng, lat);
+
   if (!_detailMinimap) {
     _detailMinimap = new maplibregl.Map({
       container,
@@ -2000,11 +2013,10 @@ function setupDetailMinimap(feature) {
         ],
       },
       center: [lng, lat],
-      // Zoom 17 = roughly the level where you can identify the facility
-      // building, its courtyard, the road in front. Tighter than the
-      // previous 15 (which was 'block-level'). User can zoom out for
-      // wider context via the inline +/- controls.
-      zoom: 17,
+      // Zoom 16 = building-block scale, ~1-4 tiles for first paint
+      // (vs ~4-9 at z17). User can pinch/scroll/+button to zoom tighter
+      // for individual buildings if they want.
+      zoom: 16,
       attributionControl: false,
       cooperativeGestures: false,
     });
@@ -2015,42 +2027,34 @@ function setupDetailMinimap(feature) {
     // The map container is inside a hidden panel during instantiation;
     // force a resize once the panel slides in so MapLibre uses the
     // correct dimensions instead of the initial 0×00 placeholder.
+    // Two passes — 320ms catches the sidebar animation, 720ms is the
+    // safety-net for slower devices where layout hasn't settled yet.
     setTimeout(() => _detailMinimap?.resize(), 320);
+    setTimeout(() => _detailMinimap?.resize(), 720);
 
-    // First-paint signal: idle fires when tiles have loaded + rendered.
-    _detailMinimap.once("idle", () => container.classList.remove("loading"));
-
-    // Fallback: if ESRI tiles take >5s to load (CDN issue, slow connection,
-    // server flake), swap the whole block to a static satellite image so
-    // the user always sees SOMETHING instead of an empty grey rectangle.
-    _detailMinimapFallbackTimer = setTimeout(() => fallbackToStaticImage(lng, lat), 5000);
-    _detailMinimap.on("idle", () => {
-      if (_detailMinimapFallbackTimer) {
-        clearTimeout(_detailMinimapFallbackTimer);
-        _detailMinimapFallbackTimer = null;
-      }
-    });
-    _detailMinimap.on("error", (e) => {
-      // Tile errors fire often + recover on retry, so only fall back if
-      // we still haven't reached idle 3s in.
-      console.warn("[minimap] tile error", e);
-    });
+    // Every successful tile-paint fades the placeholder. 'on' (not 'once')
+    // so re-opens that flyTo() to a new facility also clear the placeholder
+    // once their tiles load. Idempotent — the .faded class no-ops if it's
+    // already present.
+    _detailMinimap.on("idle", fadeMinimapPlaceholder);
+    _detailMinimap.on("error", (e) => console.warn("[minimap] tile error", e));
   } else {
-    _detailMinimap.flyTo({ center: [lng, lat], zoom: 17, duration: 600 });
+    _detailMinimap.flyTo({ center: [lng, lat], zoom: 16, duration: 600 });
     _detailMinimapMarker?.setLngLat([lng, lat]);
+    // Placeholder was just refreshed for the new lat/lng above; the
+    // existing 'idle' handler will fade it out once tiles arrive.
   }
 }
 
 function disposeDetailMinimap() {
-  if (_detailMinimapFallbackTimer) {
-    clearTimeout(_detailMinimapFallbackTimer);
-    _detailMinimapFallbackTimer = null;
-  }
   if (_detailMinimap) {
     _detailMinimap.remove();
     _detailMinimap = null;
     _detailMinimapMarker = null;
   }
+  // Drop the placeholder img so the next open creates a fresh one
+  // pointed at the next facility's bbox (no flash of a stale location).
+  document.querySelector(".detail-minimap-placeholder")?.remove();
 }
 
 function renderDetail(feature) {
