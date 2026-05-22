@@ -24,21 +24,53 @@ REQUEST_TIMEOUT = 180
 #
 # Note: we restrict to the focus_region for the demo to keep the prototype fast.
 # A full-country run is a single bbox swap.
-OVERPASS_TEMPLATE = """
+#
+# Two query templates — one per OSM tag namespace. OSM evolved two parallel
+# schemas for health facilities:
+#   * the older `amenity=clinic|hospital|doctors|pharmacy` schema
+#   * the newer `healthcare=*` schema (clinic, hospital, doctor, dispensary,
+#     health_post, midwife, pharmacy, alternative, nurse, …)
+# Many facilities are tagged in only ONE schema, so we have to query both.
+# We batch all values of a single tag into one regex-OR query per tag (vs
+# 14 separate queries per tile) — Overpass handles regex matching natively
+# and a single query is dramatically faster + politer than the alternative.
+OVERPASS_AMENITY_TEMPLATE = """
 [out:json][timeout:{timeout}];
 (
-  node["amenity"="{amenity}"]({south},{west},{north},{east});
-  way["amenity"="{amenity}"]({south},{west},{north},{east});
+  node["amenity"~"^({values})$"]({south},{west},{north},{east});
+  way["amenity"~"^({values})$"]({south},{west},{north},{east});
 );
 out center tags;
 """
 
+OVERPASS_HEALTHCARE_TEMPLATE = """
+[out:json][timeout:{timeout}];
+(
+  node["healthcare"~"^({values})$"]({south},{west},{north},{east});
+  way["healthcare"~"^({values})$"]({south},{west},{north},{east});
+);
+out center tags;
+"""
 
-def _overpass_query(bbox: List[float], amenity: str) -> dict:
+# Values per tag namespace. School-adjacent amenities (kindergarten, childcare)
+# count as schools for our purposes because they serve children with formal
+# care/education programming — heat stress, air pollution, and flood
+# exposure threaten them the same way they threaten a primary school.
+AMENITY_VALUES = ["clinic", "hospital", "doctors", "school", "kindergarten", "childcare"]
+HEALTHCARE_VALUES = [
+    "clinic", "hospital", "doctor", "dispensary", "health_post",
+    "midwife", "nurse", "pharmacy", "alternative",
+]
+
+
+def _overpass_query(bbox: List[float], tag_key: str, values: List[str]) -> dict:
+    """Run a single regex-OR Overpass query for all values of one tag key."""
     west, south, east, north = bbox
-    query = OVERPASS_TEMPLATE.format(
+    template = (OVERPASS_AMENITY_TEMPLATE if tag_key == "amenity"
+                else OVERPASS_HEALTHCARE_TEMPLATE)
+    query = template.format(
         timeout=REQUEST_TIMEOUT - 10,
-        amenity=amenity,
+        values="|".join(values),
         south=south, west=west, north=north, east=east,
     )
     # Overpass can be rate-limited; retry with exponential backoff.
@@ -65,10 +97,49 @@ def _overpass_query(bbox: List[float], amenity: str) -> dict:
             time.sleep(3 * (attempt + 1))
         except requests.RequestException:
             time.sleep(3 * (attempt + 1))
-    raise RuntimeError(f"Overpass query failed for amenity={amenity}")
+    raise RuntimeError(f"Overpass query failed for tag={tag_key}")
 
 
-def _normalize(elements: List[dict], facility_type: str) -> List[Dict]:
+# Map raw OSM tag values to our three internal facility_type categories.
+# School-adjacent amenities (kindergarten, childcare) become "school" because
+# the climate-risk model treats them identically — children in the building
+# for hours per day, same heat/air/flood exposure profile. Pharmacies +
+# alternative practitioners are categorized as "clinic" because they're
+# primary-care touchpoints in countries with thin formal health systems.
+TAG_VALUE_TO_FTYPE = {
+    # amenity=*
+    ("amenity", "clinic"): "clinic",
+    ("amenity", "hospital"): "hospital",
+    ("amenity", "doctors"): "clinic",
+    ("amenity", "school"): "school",
+    ("amenity", "kindergarten"): "school",
+    ("amenity", "childcare"): "school",
+    # healthcare=* (newer OSM schema)
+    ("healthcare", "clinic"): "clinic",
+    ("healthcare", "hospital"): "hospital",
+    ("healthcare", "doctor"): "clinic",
+    ("healthcare", "dispensary"): "clinic",
+    ("healthcare", "health_post"): "clinic",
+    ("healthcare", "midwife"): "clinic",
+    ("healthcare", "nurse"): "clinic",
+    ("healthcare", "pharmacy"): "clinic",
+    ("healthcare", "alternative"): "clinic",
+}
+
+
+def _infer_ftype(tags: Dict) -> str:
+    """Pick the facility_type from an element's tags. Prefers `amenity` over
+    `healthcare` when both are set (the older tag is usually more specific
+    and reliable; the newer schema sometimes over-tags pharmacies as
+    'hospital' which would distort our hospital count)."""
+    for key in ("amenity", "healthcare"):
+        v = tags.get(key)
+        if v and (key, v) in TAG_VALUE_TO_FTYPE:
+            return TAG_VALUE_TO_FTYPE[(key, v)]
+    return "clinic"  # fallback — shouldn't fire since we only fetch matching tags
+
+
+def _normalize(elements: List[dict]) -> List[Dict]:
     """Collapse ways and nodes into a single list of {id, lat, lon, name, type, tags}."""
     out = []
     for el in elements:
@@ -80,6 +151,7 @@ def _normalize(elements: List[dict], facility_type: str) -> List[Dict]:
         if lat is None or lon is None:
             continue
         tags = el.get("tags", {}) or {}
+        facility_type = _infer_ftype(tags)
         out.append({
             "id": f"{facility_type}-{el.get('type')}-{el.get('id')}",
             "lat": lat,
@@ -139,37 +211,44 @@ def fetch(config, cache: bool = True) -> List[Dict]:
     tiles = _split_bbox(bbox)
     print(f"  [facilities] querying {len(tiles)} tile(s) for bbox {bbox}", flush=True)
 
-    clinics_raw_all = []
-    hospitals_raw_all = []
-    schools_raw_all = []
+    # Collect raw elements across all tiles + both tag schemas. Dedupe
+    # happens after normalization (an element tagged both amenity=clinic
+    # and healthcare=clinic appears in BOTH queries — same OSM id either
+    # way, so dedupe-by-id collapses the duplicate).
+    elements_all: List[dict] = []
 
     for i, tile in enumerate(tiles):
         print(f"  [facilities] tile {i+1}/{len(tiles)}: {tile}", flush=True)
-        for amenity, target_list in [("clinic", clinics_raw_all), ("hospital", hospitals_raw_all), ("school", schools_raw_all)]:
+        for tag_key, values in [("amenity", AMENITY_VALUES),
+                                ("healthcare", HEALTHCARE_VALUES)]:
             try:
-                result = _overpass_query(tile, amenity)
-                target_list.extend(result.get("elements", []))
-                print(f"    {amenity}: {len(result.get('elements', []))} found", flush=True)
+                result = _overpass_query(tile, tag_key, values)
+                elements_all.extend(result.get("elements", []))
+                print(f"    {tag_key}: {len(result.get('elements', []))} found", flush=True)
             except Exception as e:
-                print(f"    {amenity}: FAILED ({e})", flush=True)
+                print(f"    {tag_key}: FAILED ({e})", flush=True)
             time.sleep(1)  # be polite to Overpass between queries
 
-    clinics_raw = {"elements": clinics_raw_all}
-    hospitals_raw = {"elements": hospitals_raw_all}
-    schools_raw = {"elements": schools_raw_all}
+    normalized = _normalize(elements_all)
 
-    clinics = _normalize(clinics_raw.get("elements", []), "clinic")
-    hospitals = _normalize(hospitals_raw.get("elements", []), "hospital")
-    schools = _normalize(schools_raw.get("elements", []), "school")
-
-    # Interleave types so any --limit gets a balanced mix of all three.
-    import itertools
-    groups = [clinics, hospitals, schools]
+    # Dedupe by id. An element tagged in both `amenity` and `healthcare`
+    # schemas (common for newer OSM contributions) is returned by both
+    # queries with the same OSM id; we keep one copy. _infer_ftype prefers
+    # `amenity` over `healthcare` so dedupe-by-id is order-stable.
+    seen = set()
     facilities: List[Dict] = []
-    for batch in itertools.zip_longest(*groups):
-        for item in batch:
-            if item is not None:
-                facilities.append(item)
+    for f in normalized:
+        if f["id"] in seen:
+            continue
+        seen.add(f["id"])
+        facilities.append(f)
+
+    by_type: Dict[str, int] = {}
+    for f in facilities:
+        by_type[f["type"]] = by_type.get(f["type"], 0) + 1
+    summary = ", ".join(f"{v} {k}s" for k, v in sorted(by_type.items()))
+    print(f"  [facilities] {len(facilities)} unique facilities after dedupe ({summary})",
+          flush=True)
 
     cache_path.write_text(json.dumps(facilities, indent=2))
     return facilities

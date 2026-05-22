@@ -53,11 +53,17 @@ sources:
 # scoring; flooding is real but geographically confined to the Tana River
 # basin and parts of the Lake Victoria region, not the country at large.
 #
-# Known scoring limitation: Kenya's worst sites stack only 2 hazards (heat+
-# drought) where NGA stacks 4 (heat+air+child+frag). The additive model caps
-# KEN at ~70 even when both maxed hazards are extreme. v0.5 plans a "single-
-# extreme-hazard" component that would surface such sites as SEVERE without
-# requiring per-country weight gymnastics.
+# Known scoring distribution: Kenya's worst sites stack only 2 hazards
+# (heat+drought) where NGA stacks 4 (heat+air+child+frag). The additive
+# model caps KEN at ~70. A v0.5 spike modelled adding a max-hazard term
+# but it disproportionately inflated NGA (238 → 8,000+ SEVERE under a
+# 15% max-term weight) because so many NGA facilities are heat-maxed.
+# Decision: the 0-SEVERE result for KEN is HONEST — Kenya's worst sites
+# are SINGLE-HAZARD-extreme, not multi-hazard-extreme. That's a real
+# country-profile difference, not a methodology gap, and changing global
+# scoring to populate one country's SEVERE band would distort everyone
+# else. The HIGH-band count (668 facilities) correctly identifies the
+# ASAL pastoralist regions that bear the actual climate-justice burden.
 scoring_weights:
   heat_exposure: 0.30
   air_pollution: 0.10

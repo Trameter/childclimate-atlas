@@ -60,6 +60,14 @@ def _cache_path(lat: float, lon: float) -> Path:
 class RateLimited(Exception):
     """Open-Meteo returned 429. Signals the caller to pause sampling
     rather than retry this individual point — rate limits are global."""
+
+
+class DailyQuotaExhausted(Exception):
+    """Open-Meteo returned 429 with a 'Daily API request limit exceeded'
+    message. Distinct from RateLimited because pausing won't help —
+    the quota resets at UTC midnight, not on a rolling window. Caller
+    should abort sampling and fall back to nearest-neighbor on what's
+    already cached."""
     pass
 
 
@@ -102,6 +110,17 @@ def _fetch_point(lat: float, lon: float) -> Dict:
                 cache.write_text(json.dumps(payload))
                 return payload
             if resp.status_code == 429:
+                # Distinguish two flavors of 429:
+                # - Daily quota exhausted: resets at UTC midnight, no point
+                #   pausing. Abort sampling entirely.
+                # - Hourly/burst limit: a 1-10 min pause clears it.
+                body = ""
+                try:
+                    body = resp.text or ""
+                except Exception:
+                    pass
+                if "daily" in body.lower() and "limit" in body.lower():
+                    raise DailyQuotaExhausted(body[:200])
                 # Rate-limited. Don't retry within this point — the limit
                 # is a global (per-IP, rolling-hour) condition, not a
                 # per-request condition. Looping here just burns minutes
@@ -158,6 +177,16 @@ def fetch_for_facilities(facilities: List[Dict], sample_stride: int = 5) -> Dict
     summaries: Dict[str, Dict] = {}
     sampled_points: List[Dict] = []
 
+    # Sort by id before stride-sampling so the *same* facilities are picked
+    # every run regardless of the order the upstream source returned them.
+    # Without this, a refactor that changes facility ordering (like the
+    # v0.5 healthcare-schema expansion) silently changes which lat/lons
+    # get nearest-neighbor-assigned to each other facility, causing scores
+    # to shift even though the underlying climate at each facility hasn't
+    # changed. The stride still indexes by position — we just stabilize
+    # which positions things land in.
+    facilities = sorted(facilities, key=lambda f: f["id"])
+
     to_sample = [(i, f) for i, f in enumerate(facilities) if i % sample_stride == 0]
     total = len(to_sample)
     print(f"  [climate] sampling {total} points (stride {sample_stride})", flush=True)
@@ -184,6 +213,15 @@ def fetch_for_facilities(facilities: List[Dict], sample_stride: int = 5) -> Dict
                 net += 1
                 # Polite pacing only on real network calls.
                 time.sleep(0.25)
+        except DailyQuotaExhausted as e:
+            # Daily quota is exhausted; resets at UTC midnight. No point
+            # pausing. Drop the rest of the queue and fall through to the
+            # nearest-neighbor fill on whatever's already cached. Build
+            # completes with slightly degraded accuracy for the uncached
+            # spots, but is self-consistent and ships today.
+            print(f"  [climate] DAILY quota exhausted after {idx} points — skipping {len(queue)+1} remaining samples, falling back to cache+nearest-neighbor ({e})", flush=True)
+            idx -= 1
+            queue.clear()
         except RateLimited:
             # Global endpoint cooldown. Re-queue this point for retry
             # after the pause, then sleep — one cooldown covers all
@@ -203,8 +241,56 @@ def fetch_for_facilities(facilities: List[Dict], sample_stride: int = 5) -> Dict
             pct = 100 * idx / total
             print(f"  [climate] {idx}/{total} ({pct:.0f}%) — cache hits {hits}, network {net}, skips {skips}, rate-limit pauses {rate_limited}, elapsed {elapsed:.0f}s", flush=True)
 
-    # Nearest-neighbor fill for the rest
-    if not sampled_points:
+    # Try-cache-first fill — for facilities NOT sampled this run, check if
+    # their own (lat, lon) already has a cached climate point from a
+    # previous run (at a different stride, or a different country build
+    # that happened to sample nearby). Using a facility's OWN cached
+    # climate is strictly more accurate than the nearest-neighbor of an
+    # arbitrary sample set, and it makes scores stable across rebuilds.
+    own_cache_hits = 0
+    for f in facilities:
+        if f["id"] in summaries:
+            continue
+        cp = _cache_path(f["lat"], f["lon"])
+        if cp.exists():
+            try:
+                summaries[f["id"]] = _summarize(json.loads(cp.read_text()).get("daily") or {})
+                own_cache_hits += 1
+            except (json.JSONDecodeError, OSError):
+                pass
+    if own_cache_hits:
+        print(f"  [climate] reused own-location cache for {own_cache_hits} additional facilities", flush=True)
+
+    # Nearest-neighbor fill for the genuinely-uncached rest, using the FULL
+    # disk cache (not just this run's sampled_points). Reason: facility X
+    # might have been a sample point in a previous build (so its lat/lon
+    # is in the cache) but not this run — using only sampled_points for NN
+    # search would miss X's data entirely and pick a more distant cached
+    # point instead. Loading the whole cache once amortizes I/O across all
+    # NN lookups and produces stable scores across builds.
+    cache_points = list(sampled_points)  # start with sampled (already have summaries)
+    cache_seen = {(round(p["lat"], 2), round(p["lon"], 2)) for p in cache_points}
+    if _CACHE_DIR.exists():
+        for cache_file in _CACHE_DIR.glob("*.json"):
+            # Filename format: "{lat:.2f}_{lon:.2f}.json"
+            stem = cache_file.stem
+            try:
+                lat_str, lon_str = stem.rsplit("_", 1)
+                lat_v, lon_v = float(lat_str), float(lon_str)
+            except (ValueError, IndexError):
+                continue
+            key = (round(lat_v, 2), round(lon_v, 2))
+            if key in cache_seen:
+                continue
+            try:
+                summary = _summarize(json.loads(cache_file.read_text()).get("daily") or {})
+                cache_points.append({"lat": lat_v, "lon": lon_v, "summary": summary})
+                cache_seen.add(key)
+            except (json.JSONDecodeError, OSError):
+                continue
+    print(f"  [climate] nearest-neighbor pool: {len(cache_points)} cached points (full disk cache)", flush=True)
+
+    if not cache_points:
         return summaries
 
     def dist2(a_lat, a_lon, b_lat, b_lon):
@@ -214,7 +300,7 @@ def fetch_for_facilities(facilities: List[Dict], sample_stride: int = 5) -> Dict
         if f["id"] in summaries:
             continue
         nearest = min(
-            sampled_points,
+            cache_points,
             key=lambda p: dist2(f["lat"], f["lon"], p["lat"], p["lon"]),
         )
         summaries[f["id"]] = dict(nearest["summary"])

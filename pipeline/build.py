@@ -17,6 +17,7 @@ from typing import Dict, List
 from .config import load_country, CountryConfig, PROCESSED_DIR
 from .sources import facilities as facilities_src
 from .sources import grid3 as grid3_src
+from .sources import healthsites as healthsites_src
 from .sources import climate as climate_src
 from .sources import air_quality as air_src
 from .sources import geocode as geocode_src
@@ -91,6 +92,20 @@ def build(iso3: str, limit: int | None = None, fresh: bool = False, full: bool =
     _log("Fetching facilities from OSM Overpass...")
     all_facilities = facilities_src.fetch(config, cache=not fresh)
     _log(f"  got {len(all_facilities)} facilities from OSM (clinics + hospitals + schools)")
+
+    # Optional: merge Healthsites.io (Kartoza + Global Healthsites Mapping
+    # Project). Curated + OSM-derived; the small unique-to-Healthsites set
+    # adds facilities OSM Overpass missed. Dedupe by id collapses overlap
+    # (Healthsites IDs share the same OSM-id format we use). Requires
+    # HEALTHSITES_API_KEY in env — silent skip if not configured.
+    if config.sources.get("healthsites"):
+        _log("Fetching Healthsites.io supplementary facilities...")
+        hs_facilities = healthsites_src.fetch(config, cache=not fresh)
+        if hs_facilities:
+            existing_ids = {f["id"] for f in all_facilities}
+            new_hs = [f for f in hs_facilities if f["id"] not in existing_ids]
+            _log(f"  Healthsites: {len(hs_facilities)} total, {len(new_hs)} net-new after dedupe")
+            all_facilities = all_facilities + new_hs
 
     # Optional: merge GRID3 Nigeria Health Facilities v2.0 (CC BY 4.0).
     # OSM coverage of Nigerian PHCs is uneven (e.g. urban Kano gaps); the

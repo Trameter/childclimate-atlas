@@ -16,7 +16,7 @@ from typing import Dict, List
 import requests
 
 from ..config import RAW_DIR
-from .climate import RateLimited  # shared so the circuit-breaker logic matches
+from .climate import RateLimited, DailyQuotaExhausted  # shared so the circuit-breaker logic matches
 
 AQ_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 REQUEST_TIMEOUT = 30
@@ -58,6 +58,14 @@ def _fetch_point(lat: float, lon: float) -> Dict:
                 cache.write_text(json.dumps(payload))
                 return payload
             if resp.status_code == 429:
+                # Same daily-vs-rolling distinction as climate.py.
+                body = ""
+                try:
+                    body = resp.text or ""
+                except Exception:
+                    pass
+                if "daily" in body.lower() and "limit" in body.lower():
+                    raise DailyQuotaExhausted(body[:200])
                 # Same reasoning as climate: 429 is a global condition,
                 # surface it as RateLimited so the loop-level circuit
                 # breaker pauses sampling once instead of per-point.
@@ -106,6 +114,11 @@ def fetch_for_facilities(facilities: List[Dict], sample_stride: int = 5) -> Dict
     summaries: Dict[str, Dict] = {}
     sampled_points: List[Dict] = []
 
+    # Stable ordering — see climate.py for the full rationale. Same fix
+    # applied here so air-quality scoring is also robust to facility-list
+    # order shifts (kindergartens added, dedupe re-ordered, etc.).
+    facilities = sorted(facilities, key=lambda f: f["id"])
+
     to_sample = [(i, f) for i, f in enumerate(facilities) if i % sample_stride == 0]
     total = len(to_sample)
     print(f"  [air] sampling {total} points (stride {sample_stride})", flush=True)
@@ -131,6 +144,13 @@ def fetch_for_facilities(facilities: List[Dict], sample_stride: int = 5) -> Dict
             else:
                 net += 1
                 time.sleep(0.25)
+        except DailyQuotaExhausted as e:
+            # See climate.py — quota resets at UTC midnight, no point
+            # waiting. Abort sampling cleanly, let nearest-neighbor fill
+            # the rest from existing cache.
+            print(f"  [air] DAILY quota exhausted after {idx} points — skipping {len(queue)+1} remaining samples, falling back to cache+nearest-neighbor ({e})", flush=True)
+            idx -= 1
+            queue.clear()
         except RateLimited:
             rate_limited += 1
             queue.insert(0, (i, f))
@@ -147,7 +167,45 @@ def fetch_for_facilities(facilities: List[Dict], sample_stride: int = 5) -> Dict
             pct = 100 * idx / total
             print(f"  [air] {idx}/{total} ({pct:.0f}%) — cache hits {hits}, network {net}, skips {skips}, rate-limit pauses {rate_limited}, elapsed {elapsed:.0f}s", flush=True)
 
-    if not sampled_points:
+    # Try-cache-first fill — see climate.py for the full rationale.
+    own_cache_hits = 0
+    for f in facilities:
+        if f["id"] in summaries:
+            continue
+        cp = _cache_path(f["lat"], f["lon"])
+        if cp.exists():
+            try:
+                summaries[f["id"]] = _summarize(json.loads(cp.read_text()).get("hourly") or {})
+                own_cache_hits += 1
+            except (json.JSONDecodeError, OSError):
+                pass
+    if own_cache_hits:
+        print(f"  [air] reused own-location cache for {own_cache_hits} additional facilities", flush=True)
+
+    # Nearest-neighbor fill using the FULL disk cache (not just this run's
+    # sampled_points). See climate.py for the full rationale — same fix.
+    cache_points = list(sampled_points)
+    cache_seen = {(round(p["lat"], 2), round(p["lon"], 2)) for p in cache_points}
+    if _CACHE_DIR.exists():
+        for cache_file in _CACHE_DIR.glob("*.json"):
+            stem = cache_file.stem
+            try:
+                lat_str, lon_str = stem.rsplit("_", 1)
+                lat_v, lon_v = float(lat_str), float(lon_str)
+            except (ValueError, IndexError):
+                continue
+            key = (round(lat_v, 2), round(lon_v, 2))
+            if key in cache_seen:
+                continue
+            try:
+                summary = _summarize(json.loads(cache_file.read_text()).get("hourly") or {})
+                cache_points.append({"lat": lat_v, "lon": lon_v, "summary": summary})
+                cache_seen.add(key)
+            except (json.JSONDecodeError, OSError):
+                continue
+    print(f"  [air] nearest-neighbor pool: {len(cache_points)} cached points (full disk cache)", flush=True)
+
+    if not cache_points:
         return summaries
 
     def dist2(a_lat, a_lon, b_lat, b_lon):
@@ -157,7 +215,7 @@ def fetch_for_facilities(facilities: List[Dict], sample_stride: int = 5) -> Dict
         if f["id"] in summaries:
             continue
         nearest = min(
-            sampled_points,
+            cache_points,
             key=lambda p: dist2(f["lat"], f["lon"], p["lat"], p["lon"]),
         )
         summaries[f["id"]] = dict(nearest["summary"])
