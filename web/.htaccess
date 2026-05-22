@@ -61,8 +61,15 @@ AddDefaultCharset UTF-8
 
 # ----- 4. Cache headers — per asset type
 <IfModule mod_headers.c>
-  # CSS / JS / images — 1 week
-  <FilesMatch "\.(css|js|svg|png|jpg|jpeg|webp|ico)$">
+  # JS — very short cache (60s + must-revalidate) so dev iterations land
+  # immediately. Long cache on JS is a footgun: a deployed-but-cached
+  # broken JS file becomes invisible-broken because the user's browser
+  # never refetches. 60s revalidate gives us speed + freshness.
+  <FilesMatch "\.js$">
+    Header set Cache-Control "public, max-age=60, must-revalidate"
+  </FilesMatch>
+  # CSS / images — 1 week (these change less often)
+  <FilesMatch "\.(css|svg|png|jpg|jpeg|webp|ico)$">
     Header set Cache-Control "public, max-age=604800"
   </FilesMatch>
   # Fonts — 30 days, immutable
