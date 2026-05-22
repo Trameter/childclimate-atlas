@@ -24,9 +24,21 @@ sources:
   worldpop: false
 
 scoring_weights:
-  heat_exposure: 0.20
-  air_pollution: 0.20
+  # Country-specific overrides, methodologically consistent with NGA + BGD:
+  # each country lifts its dominant hazard to 0.30 and lowers the weakest
+  # signal (facility_fragility, v0.2 OSM-tag heuristic) to 0.05.
+  #
+  # For Guatemala the dominant hazard is heat in the Pacific lowlands —
+  # facilities in Suchitepéquez, Escuintla, and Santa Rosa post heat-index
+  # days of 250-270/yr (mirroring the Sahel argument for NGA's 0.30). The
+  # original 0.20 left these maxed-on-heat schools capped at ~72 and out of
+  # the SEVERE band even with extreme drought + PM2.5 stacked on top.
+  # Drought stays high (0.20) — the Dry Corridor is GTM-specific and a
+  # documented driver of child malnutrition. Air drops to 0.15 because PM2.5
+  # is real but more variable here than in NGA Kano/Lagos.
+  heat_exposure: 0.30
+  air_pollution: 0.15
   flood_risk: 0.15
-  drought_risk: 0.20   # Dry corridor is a major child malnutrition driver
+  drought_risk: 0.20
   child_density: 0.15
-  facility_fragility: 0.10
+  facility_fragility: 0.05
