@@ -1993,6 +1993,20 @@ function setupDetailMinimap(feature) {
   const link = document.getElementById("detail-map-link");
   if (link) link.href = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
 
+  // renderDetail rewrites #detail's innerHTML on every facility click,
+  // which destroys the old .detail-minimap-wrap (including the old
+  // #detail-minimap div). If our cached _detailMinimap is still bound to
+  // that detached node, its flyTo() runs against a ghost — the new live
+  // #detail-minimap div in the DOM stays empty, and worse, the old map's
+  // eventual 'idle' fires and fades the new placeholder. Net symptom:
+  // "the light comes on then dims back to dark" on every reopen. Tear
+  // down the stale instance so the create-fresh branch below kicks in.
+  if (_detailMinimap && _detailMinimap.getContainer() !== container) {
+    _detailMinimap.remove();
+    _detailMinimap = null;
+    _detailMinimapMarker = null;
+  }
+
   // Paint the static placeholder first so the user sees something within
   // one HTTP round-trip — see ensureMinimapPlaceholder() docstring.
   ensureMinimapPlaceholder(lng, lat);
@@ -2327,8 +2341,25 @@ function setUrlParam(key, value) {
 // (country needs to switch first, state filter waits for data, facility
 // waits for state). Cleared after the initial load completes; subsequent
 // switches don't re-read these.
+//
+// Hard-refresh handling: if this load was triggered by an explicit reload
+// (cmd-R, F5, refresh button), treat it as a fresh visit — drop the
+// ?facility= deep-link so the detail panel doesn't auto-open. URLs pasted
+// into a new tab or clicked from elsewhere still deep-link normally. We
+// also replaceState to scrub the param so subsequent reloads of the same
+// tab also land clean.
 const _initialUrl = (() => {
   const params = new URL(window.location.href).searchParams;
+  const navType = (typeof performance !== "undefined"
+    && performance.getEntriesByType
+    && performance.getEntriesByType("navigation")[0]?.type) || "navigate";
+  const isReload = navType === "reload";
+  if (isReload && params.has("facility")) {
+    const u = new URL(window.location.href);
+    u.searchParams.delete("facility");
+    history.replaceState(null, "", u.toString());
+    return { country: params.get("country"), state: params.get("state"), facility: null };
+  }
   return {
     country: params.get("country"),
     state: params.get("state"),
