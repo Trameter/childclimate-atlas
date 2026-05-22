@@ -1970,6 +1970,22 @@ function fadeMinimapPlaceholder() {
   if (img) img.classList.add("faded");
 }
 
+// Only fade the placeholder once MapLibre has (a) been sized to a real
+// viewport AND (b) loaded tiles for that viewport. The first 'idle' event
+// often fires within milliseconds of map creation while the container is
+// still 0×0 (the detail panel is still sliding in, our 320/720ms resize
+// passes haven't run yet). At 0×0 there are no tiles to load, so 'idle'
+// trivially fires — and if we faded on that we'd reveal an empty dark
+// canvas with no tiles in it, which is exactly the "light comes on then
+// dims back to dark" bug.
+function maybeFadeMinimapPlaceholder() {
+  if (!_detailMinimap) return;
+  const canvas = _detailMinimap.getCanvas();
+  if (!canvas || canvas.width < 100 || canvas.height < 100) return;
+  if (!_detailMinimap.areTilesLoaded || !_detailMinimap.areTilesLoaded()) return;
+  fadeMinimapPlaceholder();
+}
+
 function setupDetailMinimap(feature) {
   const container = document.getElementById("detail-minimap");
   if (!container) return;
@@ -2032,11 +2048,12 @@ function setupDetailMinimap(feature) {
     setTimeout(() => _detailMinimap?.resize(), 320);
     setTimeout(() => _detailMinimap?.resize(), 720);
 
-    // Every successful tile-paint fades the placeholder. 'on' (not 'once')
-    // so re-opens that flyTo() to a new facility also clear the placeholder
-    // once their tiles load. Idempotent — the .faded class no-ops if it's
-    // already present.
-    _detailMinimap.on("idle", fadeMinimapPlaceholder);
+    // Every successful tile-paint fades the placeholder, gated by
+    // maybeFadeMinimapPlaceholder() so the spurious 0×0-canvas idle that
+    // fires before our resize() pass doesn't trigger a premature fade.
+    // 'on' (not 'once') so re-opens that flyTo() to a new facility also
+    // clear the placeholder once their new tiles load.
+    _detailMinimap.on("idle", maybeFadeMinimapPlaceholder);
     _detailMinimap.on("error", (e) => console.warn("[minimap] tile error", e));
   } else {
     _detailMinimap.flyTo({ center: [lng, lat], zoom: 16, duration: 600 });
