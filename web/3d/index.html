@@ -59,7 +59,6 @@
         <a href="/3d" class="vt-btn active" aria-current="page" title="Immersive view — 3D globe">3D</a>
         <a href="/vr" class="vt-btn" title="VR — WebXR immersive">VR</a>
       </div>
-      <span class="chip" id="facility-chip"><span class="dot"></span><span id="facility-chip-text">v0.2 · 62,817 facilities</span></span>
       <a class="btn" href="https://github.com/Trameter/childclimate-atlas" target="_blank" rel="noopener">GitHub</a>
     </div>
   </header>
@@ -193,16 +192,16 @@
            dots are on the map. Bodied in app.js as showMapLoading/hide. -->
       <div class="map-loading" id="map-loading">
         <span class="map-loading-dot"></span>
-        <span class="map-loading-text">Loading the globe…</span>
+        <span class="map-loading-text">Loading…</span>
       </div>
 
       <!-- Map HUD -->
       <div class="map-hud-tl">
         <div class="hud mono" id="hud-country">Nigeria · — facilities</div>
         <div class="hud mono" id="hud-heatmap">Hazards · off</div>
-        <div class="hud mono hud-year-row" title="Apply IPCC SSP2-4.5 projection multipliers to hazard overlays. Auto-enables hazards.">
+        <div class="hud mono hud-year-row" title="Apply IPCC AR6 SSP3-7.0 regional projection multipliers to the hazard overlays. Today = baseline from current data (ERA5 + CAMS, 2024 sampling). Auto-enables hazards on click.">
           <span class="hud-year-label">Year</span>
-          <button class="year-chip active" data-year="2024" type="button">2024</button>
+          <button class="year-chip active" data-year="2024" type="button">Today</button>
           <button class="year-chip" data-year="2030" type="button">2030</button>
           <button class="year-chip" data-year="2050" type="button">2050</button>
         </div>
