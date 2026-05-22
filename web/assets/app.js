@@ -1915,6 +1915,31 @@ let _activeMicroScene = null;
 // disposeDetailMinimap() so the WebGL context is released.
 let _detailMinimap = null;
 let _detailMinimapMarker = null;
+let _detailMinimapFallbackTimer = null;
+
+// If ESRI tiles haven't painted within the timeout, swap the whole
+// minimap-wrap with a static fallback image so the user sees SOMETHING.
+// Same ESRI export endpoint we used for the static-thumbnail era —
+// single HTTP request, much more forgiving than the multi-tile fetch.
+function fallbackToStaticImage(lng, lat) {
+  const wrap = document.querySelector(".detail-minimap-wrap");
+  if (!wrap) return;
+  if (_detailMinimap) {
+    _detailMinimap.remove();
+    _detailMinimap = null;
+    _detailMinimapMarker = null;
+  }
+  const PAD = 0.0015;
+  const w = lng - PAD, e = lng + PAD, s = lat - PAD, n = lat + PAD;
+  const url = `https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export?bbox=${w},${s},${e},${n}&size=480,440&format=jpg&bboxSR=4326&imageSR=3857&f=image`;
+  // Replace the interactive map div with a static img + pin marker.
+  wrap.innerHTML = `
+    <img src="${url}" alt="Satellite view" style="display:block;width:100%;height:100%;object-fit:cover" />
+    <div class="detail-satellite-pin" aria-hidden="true"></div>
+    <a class="detail-satellite-link" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${lat},${lng}" title="Open this location in Google Maps">View on Google Maps →</a>
+    <div class="detail-satellite-attr mono">© Esri · Maxar</div>
+  `;
+}
 
 function setupDetailMinimap(feature) {
   const container = document.getElementById("detail-minimap");
@@ -1923,6 +1948,10 @@ function setupDetailMinimap(feature) {
   const link = document.getElementById("detail-map-link");
   if (link) link.href = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
 
+  // Show a loading state immediately so the user sees feedback while
+  // ESRI's tile CDN spins up. Removed when the map's first tiles paint
+  // or when we fall back to the static image.
+  container.classList.add("loading");
   if (!_detailMinimap) {
     _detailMinimap = new maplibregl.Map({
       container,
@@ -1969,8 +1998,27 @@ function setupDetailMinimap(feature) {
       .addTo(_detailMinimap);
     // The map container is inside a hidden panel during instantiation;
     // force a resize once the panel slides in so MapLibre uses the
-    // correct dimensions instead of the initial 0×0 placeholder.
+    // correct dimensions instead of the initial 0×00 placeholder.
     setTimeout(() => _detailMinimap?.resize(), 320);
+
+    // First-paint signal: idle fires when tiles have loaded + rendered.
+    _detailMinimap.once("idle", () => container.classList.remove("loading"));
+
+    // Fallback: if ESRI tiles take >5s to load (CDN issue, slow connection,
+    // server flake), swap the whole block to a static satellite image so
+    // the user always sees SOMETHING instead of an empty grey rectangle.
+    _detailMinimapFallbackTimer = setTimeout(() => fallbackToStaticImage(lng, lat), 5000);
+    _detailMinimap.on("idle", () => {
+      if (_detailMinimapFallbackTimer) {
+        clearTimeout(_detailMinimapFallbackTimer);
+        _detailMinimapFallbackTimer = null;
+      }
+    });
+    _detailMinimap.on("error", (e) => {
+      // Tile errors fire often + recover on retry, so only fall back if
+      // we still haven't reached idle 3s in.
+      console.warn("[minimap] tile error", e);
+    });
   } else {
     _detailMinimap.flyTo({ center: [lng, lat], zoom: 17, duration: 600 });
     _detailMinimapMarker?.setLngLat([lng, lat]);
@@ -1978,6 +2026,10 @@ function setupDetailMinimap(feature) {
 }
 
 function disposeDetailMinimap() {
+  if (_detailMinimapFallbackTimer) {
+    clearTimeout(_detailMinimapFallbackTimer);
+    _detailMinimapFallbackTimer = null;
+  }
   if (_detailMinimap) {
     _detailMinimap.remove();
     _detailMinimap = null;
