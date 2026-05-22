@@ -1908,6 +1908,68 @@ function computeDrivers(comps, weights, climate, air) {
 // and we'd hit the 16-context browser cap after ~16 facility opens.
 let _activeMicroScene = null;
 
+// Single MapLibre instance reused across facility opens for the detail
+// panel's neighbourhood mini-map. Created lazily on first detail open;
+// subsequent opens just flyTo() the new facility's coordinates and
+// re-position the marker. Disposed when the detail panel closes via
+// disposeDetailMinimap() so the WebGL context is released.
+let _detailMinimap = null;
+let _detailMinimapMarker = null;
+
+function setupDetailMinimap(feature) {
+  const container = document.getElementById("detail-minimap");
+  if (!container) return;
+  const [lng, lat] = feature.geometry.coordinates;
+  const link = document.getElementById("detail-map-link");
+  if (link) link.href = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+
+  if (!_detailMinimap) {
+    _detailMinimap = new maplibregl.Map({
+      container,
+      style: {
+        version: 8,
+        sources: {
+          "voyager-tiles": {
+            type: "raster",
+            tiles: [
+              "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+              "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+              "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+              "https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+            ],
+            tileSize: 256,
+            attribution: "© OpenStreetMap · © CARTO",
+          },
+        },
+        layers: [{ id: "voyager-base", type: "raster", source: "voyager-tiles" }],
+      },
+      center: [lng, lat],
+      zoom: 15,
+      attributionControl: false,
+      cooperativeGestures: false,
+    });
+    _detailMinimap.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
+    _detailMinimapMarker = new maplibregl.Marker({ color: "#D87B4F" })
+      .setLngLat([lng, lat])
+      .addTo(_detailMinimap);
+    // The map container is inside a hidden panel during instantiation;
+    // force a resize once the panel slides in so MapLibre uses the
+    // correct dimensions instead of the initial 0×0 placeholder.
+    setTimeout(() => _detailMinimap?.resize(), 320);
+  } else {
+    _detailMinimap.flyTo({ center: [lng, lat], zoom: 15, duration: 600 });
+    _detailMinimapMarker?.setLngLat([lng, lat]);
+  }
+}
+
+function disposeDetailMinimap() {
+  if (_detailMinimap) {
+    _detailMinimap.remove();
+    _detailMinimap = null;
+    _detailMinimapMarker = null;
+  }
+}
+
 function renderDetail(feature) {
   const p = feature.properties;
   const s = p.risk_score;
@@ -2033,15 +2095,17 @@ function renderDetail(feature) {
       </div>
     </div>
 
-    <!-- Satellite imagery from ESRI World_Imagery REST endpoint, centred
-         on the facility's lat/lng. The link overlay opens Google Maps at
-         the same coordinates so the user can zoom + pan + street-view if
-         the thumbnail piques their interest. -->
-    <div class="detail-satellite" id="detail-satellite">
-      <img id="detail-satellite-img" alt="Satellite view of the facility's location" />
-      <div class="detail-satellite-pin" aria-hidden="true"></div>
-      <a id="detail-satellite-link" class="detail-satellite-link" target="_blank" rel="noopener" title="Open this location in Google Maps">View on Google Maps →</a>
-      <div class="detail-satellite-attr mono">Satellite · Esri / Maxar</div>
+    <!-- Interactive mini-map of the facility's neighbourhood. MapLibre
+         instance loaded lazily on detail open, disposed on close. Tiles
+         from CARTO Voyager (already CSP-whitelisted) which gives roads,
+         place labels, building outlines — the 'show me the actual place'
+         richness a static satellite tile couldn't. The Google Maps link
+         lets the user dive into a full street-view / satellite experience
+         if the minimap piques their interest. -->
+    <div class="detail-minimap-wrap">
+      <div class="detail-minimap" id="detail-minimap"></div>
+      <a id="detail-map-link" class="detail-satellite-link" target="_blank" rel="noopener" title="Open this location in Google Maps">View on Google Maps →</a>
+      <div class="detail-satellite-attr mono">© OSM · CARTO</div>
     </div>
 
     <!-- Micro-scene: a small Three.js vignette that procedurally visualises
@@ -2081,30 +2145,11 @@ function renderDetail(feature) {
   // Trigger map resize so MapLibre recalculates center/zoom for the narrower canvas
   setTimeout(() => map.resize(), 260);
 
-  // Wire the satellite thumbnail. ESRI World_Imagery REST endpoint —
-  // no API key, free for non-commercial / prototype use, attribution
-  // baked into the .detail-satellite-attr caption. ±0.003° bbox ≈ ±330m
-  // at the equator, which gives a comfortable neighbourhood-scale view
-  // with the facility roughly centred. onerror hides the block.
-  (function setupSatellite() {
-    const wrap = document.getElementById("detail-satellite");
-    const img  = document.getElementById("detail-satellite-img");
-    if (!wrap || !img) return;
-    const lng = feature.geometry.coordinates[0];
-    const lat = feature.geometry.coordinates[1];
-    const PAD = 0.003;
-    const w = lng - PAD, e = lng + PAD;
-    const s = lat - PAD, n = lat + PAD;
-    const url = `https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export?bbox=${w},${s},${e},${n}&size=480,240&format=jpg&bboxSR=4326&imageSR=3857&f=image`;
-    img.onerror = () => { wrap.style.display = "none"; };
-    img.src = url;
-    const link = document.getElementById("detail-satellite-link");
-    if (link) {
-      // Google Maps Search API — opens a map centred on the lat/lng with
-      // a pin. User can then zoom/pan/street-view however they want.
-      link.href = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-    }
-  })();
+  // Wire the interactive neighbourhood mini-map. Lazily creates a
+  // MapLibre instance the first time it's needed and reuses it across
+  // facility opens (flyTo + marker move instead of rebuild) for speed
+  // and WebGL-context economy.
+  setupDetailMinimap(feature);
 
   // Spin up the micro-scene now that the canvas is in the DOM with its
   // final dimensions. Guarded for the case where the global isn't loaded
@@ -2139,6 +2184,8 @@ function closeDetail() {
     _activeMicroScene.dispose();
     _activeMicroScene = null;
   }
+  // Same for the detail-panel minimap (another WebGL/canvas context).
+  disposeDetailMinimap();
   // Clear the selected-facility highlight ring
   highlightFacility(null);
   // Drop the ?facility= param so a shared URL after close doesn't reopen
