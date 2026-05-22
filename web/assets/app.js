@@ -1747,16 +1747,23 @@ function updateMap() {
 
 // ---- sidebar: stats ----
 function renderStats() {
-  const n = filteredFeatures.length;
-  const scores = filteredFeatures.map(f => f.properties.risk_score);
+  // In multi-country (3D) mode filteredFeatures includes all loaded
+  // countries; the sidebar stats + HUD chip should reflect only the
+  // ACTIVE country since that's what the user is "looking at." 2D mode
+  // only has one country in allFeatures so the filter is a no-op.
+  const activeFiltered = IS_3D
+    ? filteredFeatures.filter(f => !f.properties._iso3 || f.properties._iso3 === _currentCountryIso)
+    : filteredFeatures;
+  const n = activeFiltered.length;
+  const scores = activeFiltered.map(f => f.properties.risk_score);
   const avg = n ? Math.round(scores.reduce((a, b) => a + b, 0) / n) : 0;
   const severe = scores.filter(s => s >= 75).length;
   const high = scores.filter(s => s >= 55 && s < 75).length;
   const mid = scores.filter(s => s >= 30 && s < 55).length;
   const low = scores.filter(s => s < 30).length;
-  const schools = filteredFeatures.filter(f => f.properties.facility_type === "school").length;
-  const clinics = filteredFeatures.filter(f => f.properties.facility_type === "clinic").length;
-  const hospitals = filteredFeatures.filter(f => f.properties.facility_type === "hospital").length;
+  const schools = activeFiltered.filter(f => f.properties.facility_type === "school").length;
+  const clinics = activeFiltered.filter(f => f.properties.facility_type === "clinic").length;
+  const hospitals = activeFiltered.filter(f => f.properties.facility_type === "hospital").length;
 
   document.getElementById("stats").innerHTML = `
     <div class="stat"><div class="label">Total</div><div class="value">${n.toLocaleString()}</div></div>
@@ -1999,11 +2006,14 @@ function renderDetail(feature) {
   const latStr = `${Math.abs(coords[1]).toFixed(3)}° ${coords[1] >= 0 ? "N" : "S"}`;
   const lonStr = `${Math.abs(coords[0]).toFixed(3)}° ${coords[0] >= 0 ? "E" : "W"}`;
 
-  // Rank within country — computed live from allFeatures.
-  // Smart precision so a #1-of-10,927 facility doesn't misleadingly round
-  // to "Top 0.0%".
-  const total = allFeatures.length;
-  const rank = allFeatures.filter(f => f.properties.risk_score > s).length + 1;
+  // Rank within country — computed live from this country's features only
+  // (in multi-country mode allFeatures includes all 3 countries; we want a
+  // per-country rank). Smart precision so a #1-of-10,927 facility doesn't
+  // misleadingly round to "Top 0.0%".
+  const featureIso = p._iso3 || _currentCountryIso;
+  const countryFeats = allFeatures.filter(f => !f.properties._iso3 || f.properties._iso3 === featureIso);
+  const total = countryFeats.length;
+  const rank = countryFeats.filter(f => f.properties.risk_score > s).length + 1;
   const pct = total ? ((rank / total) * 100) : 0;
   let pctStr;
   if (pct < 0.1) pctStr = pct.toFixed(2);
@@ -2679,10 +2689,6 @@ async function loadOtherCountries(activeIso) {
     }
   }
   allCountriesLoaded = true;
-
-  // --- 4. BACKGROUND PREFETCH (first load only) --------------------------
-  // Warm the cache so switching to the other two countries is instant.
-  prefetchOtherCountries(iso3);
 }
 
 // ---- event wiring ----
