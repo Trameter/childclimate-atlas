@@ -531,19 +531,124 @@
   const tipMat = new THREE.MeshBasicMaterial({ color: 0xFAF8F4 });
   function attachController(idx) {
     const c = renderer.xr.getController(idx);
-    // Origin marker — shows where the controller physically is
     c.add(new THREE.Mesh(originGeom.clone(), originMat.clone()));
-    // Beam pointing forward
     c.add(new THREE.Mesh(pointerGeom.clone(), pointerMat.clone()));
-    // Tip dot at end of beam — shows what you're aiming at
     const tip = new THREE.Mesh(tipGeom.clone(), tipMat.clone());
     tip.position.set(0, 0, -POINTER_LENGTH);
     c.add(tip);
+    // select fires for BOTH controller trigger AND hand pinch — WebXR
+    // routes hand input through the same input-source slot.
     c.addEventListener("select", () => xrPick(c));
     scene.add(c);
     return c;
   }
   let controllers = [];
+
+  // Hand-tracking fingertip markers — a small paper-white sphere at each
+  // of the 5 fingertips per hand. Attaches on the hand's 'connected'
+  // event (fires when Quest detects hands — typically when controllers
+  // are set down) and removes on disconnect.
+  const FINGERTIP_JOINTS = ["thumb-tip", "index-finger-tip", "middle-finger-tip", "ring-finger-tip", "pinky-finger-tip"];
+  const fingertipSpheres = [];
+  function attachHandFingertips(idx) {
+    const hand = renderer.xr.getHand(idx);
+    hand.addEventListener("connected", () => {
+      for (const jointName of FINGERTIP_JOINTS) {
+        const sphere = new THREE.Mesh(
+          new THREE.SphereGeometry(0.008, 12, 8),
+          new THREE.MeshBasicMaterial({ color: 0xFAF8F4 })
+        );
+        sphere.visible = false;
+        hand.add(sphere);
+        fingertipSpheres.push({ hand, jointName, sphere });
+      }
+    });
+    hand.addEventListener("disconnected", () => {
+      for (let i = fingertipSpheres.length - 1; i >= 0; i--) {
+        if (fingertipSpheres[i].hand === hand) {
+          hand.remove(fingertipSpheres[i].sphere);
+          fingertipSpheres.splice(i, 1);
+        }
+      }
+    });
+    scene.add(hand);
+    return hand;
+  }
+  function updateHandFingertips() {
+    for (const item of fingertipSpheres) {
+      const joint = item.hand.joints?.[item.jointName];
+      if (joint && joint.visible !== false) {
+        item.sphere.visible = true;
+        item.sphere.position.copy(joint.position);
+      } else {
+        item.sphere.visible = false;
+      }
+    }
+  }
+
+  // ---- AR hit-test ----
+  // Per-frame raycast against detected real-world surfaces. Reticle
+  // tracks the surface under the user's view; pulling the trigger (or
+  // pinching) places the globe at that point with its bottom on the
+  // surface — so it drops onto a real table / floor / wall.
+  let arHitTestSource = null;
+  let arHitTestReticle = null;
+  let arRefSpace = null;
+  async function setupArHitTest() {
+    if (xrSessionType !== "immersive-ar" || !xrSession) return;
+    if (!arHitTestReticle) {
+      const geom = new THREE.RingGeometry(0.06, 0.07, 32);
+      geom.rotateX(-Math.PI / 2);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xD87B4F, transparent: true, opacity: 0.85, side: THREE.DoubleSide,
+      });
+      arHitTestReticle = new THREE.Mesh(geom, mat);
+      arHitTestReticle.matrixAutoUpdate = false;
+      arHitTestReticle.visible = false;
+      scene.add(arHitTestReticle);
+    }
+    try {
+      const viewerSpace = await xrSession.requestReferenceSpace("viewer");
+      arHitTestSource = await xrSession.requestHitTestSource({ space: viewerSpace });
+      arRefSpace = renderer.xr.getReferenceSpace();
+    } catch (e) {
+      console.warn("[ar] hit-test setup failed:", e);
+    }
+  }
+  function updateArHitTest(frame) {
+    if (!arHitTestSource || !frame || !arHitTestReticle) return;
+    if (!arRefSpace) arRefSpace = renderer.xr.getReferenceSpace();
+    if (!arRefSpace) return;
+    const results = frame.getHitTestResults(arHitTestSource);
+    if (results.length) {
+      const pose = results[0].getPose(arRefSpace);
+      if (pose) {
+        arHitTestReticle.visible = true;
+        arHitTestReticle.matrix.fromArray(pose.transform.matrix);
+      }
+    } else {
+      arHitTestReticle.visible = false;
+    }
+  }
+  function teardownArHitTest() {
+    if (arHitTestSource) {
+      try { arHitTestSource.cancel(); } catch (e) {}
+      arHitTestSource = null;
+    }
+    if (arHitTestReticle) {
+      scene.remove(arHitTestReticle);
+      arHitTestReticle.geometry?.dispose();
+      arHitTestReticle.material?.dispose();
+      arHitTestReticle = null;
+    }
+    arRefSpace = null;
+  }
+  function placeGlobeAtReticle() {
+    if (!arHitTestReticle?.visible) return false;
+    const pos = new THREE.Vector3().setFromMatrixPosition(arHitTestReticle.matrix);
+    globeGroup.position.set(pos.x, pos.y + GLOBE_RADIUS + 0.05, pos.z);
+    return true;
+  }
 
   let xrSession = null;
   let xrSessionType = null;
@@ -563,12 +668,17 @@
       $("vr-detail").hidden = true;
       await renderer.xr.setSession(xrSession);
       controllers = [attachController(0), attachController(1)];
-      if (sessionType === "immersive-ar") scene.background = null;
+      attachHandFingertips(0); attachHandFingertips(1);
+      if (sessionType === "immersive-ar") {
+        scene.background = null;
+        await setupArHitTest();
+      }
       xrSession.addEventListener("end", () => {
         document.body.classList.remove("in-xr", "in-xr-ar");
         xrSession = null; xrSessionType = null;
         controllers.forEach(c => scene.remove(c));
         controllers = [];
+        teardownArHitTest();
         $("vr-enter-btn").querySelector(".vr-enter-label").textContent = "Enter VR";
         $("vr-ar-btn").querySelector(".vr-enter-label").textContent = "Enter AR";
       });
@@ -585,15 +695,68 @@
     xrTmpMat.identity().extractRotation(controller.matrixWorld);
     xrRaycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
     xrRaycaster.ray.direction.set(0, 0, -1).applyMatrix4(xrTmpMat);
-    // Intersect across all country beacon groups.
+    // 1. Try beacon pick first.
     const candidates = [];
     for (const iso of ISOS) {
       const g = beaconsGroups[iso];
       if (g) for (const c of g.children) if (c.userData.feature) candidates.push(c);
     }
     const hits = xrRaycaster.intersectObjects(candidates, false);
-    const hit = hits[0];
-    if (hit) showDetail(hit.object.userData.feature);
+    if (hits[0]) { showDetail(hits[0].object.userData.feature); return; }
+    // 2. AR fallback: if no beacon hit + the reticle is on a detected
+    //    surface, drop the globe there.
+    if (xrSessionType === "immersive-ar") placeGlobeAtReticle();
+  }
+
+  // ---------------------------------------------------------------------
+  // Per-beacon spatial audio
+  // ---------------------------------------------------------------------
+  // The top N severe beacons each get a PositionalAudio with a sine
+  // oscillator whose pitch tracks the beacon's risk score (110-180 Hz
+  // mapped from 75-100). PannerNodes give 3D directionality so turning
+  // your head spatially locates the worst sites. Capped low-volume so
+  // ~12 tones + the global drone don't pile up into noise.
+  let positionalSounds = [];
+  const SPATIAL_AUDIO_TOP_N = 12;
+  function setupSpatialAudio() {
+    if (!audioContext) return;
+    teardownSpatialAudio();
+    const all = [];
+    for (const iso of ISOS) {
+      const g = beaconsGroups[iso];
+      if (!g) continue;
+      for (const c of g.children) {
+        if (c.userData?.band === 3 && c.userData.feature) all.push(c);
+      }
+    }
+    all.sort((a, b) =>
+      (b.userData.feature.properties.risk_score || 0) -
+      (a.userData.feature.properties.risk_score || 0)
+    );
+    for (const beacon of all.slice(0, SPATIAL_AUDIO_TOP_N)) {
+      const score = beacon.userData.feature.properties.risk_score || 75;
+      const freq = 110 + Math.max(0, score - 75) * 2.8;
+      const sound = new THREE.PositionalAudio(listener);
+      const osc = audioContext.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      sound.setNodeSource(osc);
+      sound.setRefDistance(0.15);
+      sound.setMaxDistance(2.5);
+      sound.setRolloffFactor(2);
+      sound.setVolume(0.025);
+      try { osc.start(); } catch (e) {}
+      beacon.add(sound);
+      positionalSounds.push({ beacon, sound, osc });
+    }
+  }
+  function teardownSpatialAudio() {
+    for (const item of positionalSounds) {
+      try { item.osc.stop(); } catch (e) {}
+      try { item.sound.disconnect(); } catch (e) {}
+      try { item.beacon.remove(item.sound); } catch (e) {}
+    }
+    positionalSounds = [];
   }
 
   // ---------------------------------------------------------------------
@@ -628,6 +791,8 @@
     const target = audioEnabled ? 0.04 : 0;
     audioGain.gain.cancelScheduledValues(audioContext.currentTime);
     audioGain.gain.linearRampToValueAtTime(target, audioContext.currentTime + 0.6);
+    if (audioEnabled) setupSpatialAudio();
+    else teardownSpatialAudio();
     $("vr-audio-btn")?.classList.toggle("active", audioEnabled);
     $("vr-audio-btn").querySelector(".vr-audio-label").textContent = audioEnabled ? "Sound on" : "Sound off";
   }
@@ -815,6 +980,8 @@
   // ---------------------------------------------------------------------
   let lastAudioUpdate = 0;
   renderer.setAnimationLoop((time, frame) => {
+    if (xrSessionType === "immersive-ar") updateArHitTest(frame);
+    updateHandFingertips();
     runIntro(performance.now());
 
     if (!userInteracting || (performance.now() - lastInteract > AUTO_ROTATE_RESUME_MS)) {
