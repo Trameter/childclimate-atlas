@@ -116,8 +116,17 @@ def build(iso3: str, limit: int | None = None, fresh: bool = False, full: bool =
     # spatially (150m radius vs existing schools). Requires GIGA_API_KEY
     # in env — silent skip if not configured.
     if config.sources.get("giga"):
-        _log("Fetching GIGA UNICEF supplementary schools...")
-        giga_facilities = giga_src.fetch(config, cache=not fresh)
+        _log("Loading GIGA UNICEF supplementary schools...")
+        # Prefer the bulk CSV dump (downloaded via the GIGA web UI's
+        # "Download School location data" form) over the live API. The
+        # UI download is unauthenticated, far faster than paginating
+        # /api/v1/schools_location with rate limits, and produces a
+        # permanent atlas asset same as the Healthsites World.zip play.
+        # If no CSVs are present, fall through to the API path.
+        giga_facilities = giga_src.fetch_bulk_csvs(config)
+        if not giga_facilities:
+            _log("  no local GIGA CSV cache — trying API")
+            giga_facilities = giga_src.fetch(config, cache=not fresh)
         if giga_facilities:
             before_dedup = len(giga_facilities)
             giga_facilities = giga_src.dedup_against_existing(

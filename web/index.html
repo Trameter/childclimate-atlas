@@ -17,8 +17,8 @@
        first paint. crossorigin="anonymous" is required for as="fetch" to
        match the actual fetch() call in JS so the resource isn't re-fetched. -->
   <link rel="preload" href="/data/NGA.geojson" as="fetch" type="application/geo+json" crossorigin="anonymous" />
-  <link rel="stylesheet" href="./assets/vendor/maplibre-gl@5.24.0/maplibre-gl.css?v=1779540125" />
-  <link rel="stylesheet" href="./assets/style.css?v=1779540125" />
+  <link rel="stylesheet" href="./assets/vendor/maplibre-gl@5.24.0/maplibre-gl.css?v=1779575089" />
+  <link rel="stylesheet" href="./assets/style.css?v=1779575089" />
 </head>
 <body>
 
@@ -61,7 +61,7 @@
           <h1>Which clinic should we <em>harden first?</em></h1>
           <p>A 0–100 climate-risk score for every school and clinic in a country. Built on open data, published under MIT, auditable to source.</p>
           <div class="hero-stats">
-            <div class="hstat"><span class="v">152,378</span><span class="l">Facilities</span></div>
+            <div class="hstat"><span class="v">311,669</span><span class="l">Facilities</span></div>
             <div class="hstat"><span class="v">5</span><span class="l">Countries</span></div>
             <div class="hstat"><span class="v">6</span><span class="l">Sub-scores</span></div>
           </div>
@@ -227,13 +227,13 @@
   <!-- Mobile drawer backdrop: only visible when body.mobile-menu-open. Clicking it closes the drawer. -->
   <div class="mobile-backdrop" id="mobile-backdrop" aria-hidden="true"></div>
 
-  <script src="./assets/vendor/maplibre-gl@5.24.0/maplibre-gl.js?v=1779540125"></script>
+  <script src="./assets/vendor/maplibre-gl@5.24.0/maplibre-gl.js?v=1779575089"></script>
   <!-- Three.js for the per-facility micro-scene vignettes in the detail
        panel. Self-hosted r149 UMD bundle (MIT) — the last release that
        still ships a stable global-script build, which our CSP
        (script-src 'self') requires. -->
-  <script src="./assets/vendor/three@0.149.0/three.min.js?v=1779540125"></script>
-  <script src="./assets/microscene.js?v=1779540125"></script>
-  <script src="./assets/app.js?v=1779540125"></script>
+  <script src="./assets/vendor/three@0.149.0/three.min.js?v=1779575089"></script>
+  <script src="./assets/microscene.js?v=1779575089"></script>
+  <script src="./assets/app.js?v=1779575089"></script>
 </body>
 </html>

@@ -18,13 +18,13 @@ The Atlas is running at **[climate-atlas.trameter.com](http://climate-atlas.tram
 
 [![2D working dashboard — ChildClimate Risk Atlas](./docs/atlas-screenshot.png)](http://climate-atlas.trameter.com/)
 
-**[Immersive globe → climate-atlas.trameter.com/3d](http://climate-atlas.trameter.com/3d)** — the same 152,378 facilities on a tilted 3D globe with cinematic camera and pulsing rings around the most-critical sites. For storytelling, outreach, and decision-maker briefings.
+**[Immersive globe → climate-atlas.trameter.com/3d](http://climate-atlas.trameter.com/3d)** — the same 311,669 facilities on a tilted 3D globe with cinematic camera and pulsing rings around the most-critical sites. For storytelling, outreach, and decision-maker briefings.
 
 [![3D immersive view — ChildClimate Risk Atlas](./docs/atlas-3d-screenshot.jpg)](http://climate-atlas.trameter.com/3d)
 
 **[VR → climate-atlas.trameter.com/vr](http://climate-atlas.trameter.com/vr)** — WebXR tabletop globe with controller-driven interaction, spatial audio, and AR hit-test. Works in a Quest browser or via the Immersive Web Emulator Chrome extension.
 
-<sub>152,378 schools and clinics across Nigeria, Bangladesh, Guatemala, Kenya, and the Philippines. Click any dot in any view to open its risk breakdown and recommended actions. Toggle between views from the top-right at any time — filters and selection are preserved.</sub>
+<sub>311,669 schools and clinics across Nigeria, Bangladesh, Guatemala, Kenya, and the Philippines. Click any dot in any view to open its risk breakdown and recommended actions. Toggle between views from the top-right at any time — filters and selection are preserved.</sub>
 
 ---
 
@@ -60,11 +60,11 @@ Most climate vulnerability assessments stop at the country or district level. Bu
 ## Swap countries with one line
 
 ```bash
-python3 -m pipeline.build --country NGA   # Nigeria      (53,149 facilities, heat-dominant)
-python3 -m pipeline.build --country BGD   # Bangladesh   (15,994 facilities, flood-dominant)
-python3 -m pipeline.build --country GTM   # Guatemala    ( 3,287 facilities, heat + Dry Corridor)
-python3 -m pipeline.build --country KEN   # Kenya        (15,119 facilities, drought + ASAL heat)
-python3 -m pipeline.build --country PHL   # Philippines  (64,829 facilities, typhoons + monsoon)
+python3 -m pipeline.build --country NGA   # Nigeria      (159,004 facilities, heat-dominant)
+python3 -m pipeline.build --country BGD   # Bangladesh   ( 16,022 facilities, flood-dominant)
+python3 -m pipeline.build --country GTM   # Guatemala    ( 29,001 facilities, heat + Dry Corridor)
+python3 -m pipeline.build --country KEN   # Kenya        ( 41,438 facilities, drought + ASAL heat)
+python3 -m pipeline.build --country PHL   # Philippines  ( 66,204 facilities, typhoons + monsoon)
 ```
 
 …and the same pipeline produces the same output for any country worldwide. Each country's scoring weights are tuned in `config/{ISO}.yaml` to reflect its dominant hazard profile (Sahel heat for NGA, Bay of Bengal floods for BGD, Pacific lowlands + Dry Corridor for GTM, ASAL drought + heat for KEN, typhoons + monsoon for PHL).
@@ -90,6 +90,7 @@ open web/index.html
 |---|---|---|
 | Schools + clinics (primary) | [OpenStreetMap](https://www.openstreetmap.org) via Overpass (amenity + healthcare schemas) | ODbL |
 | Health facilities (supplementary) | [Healthsites.io](https://healthsites.io) global bulk shapefile (1.28M facilities worldwide; sliced per-country at build time) | ODbL |
+| Schools (supplementary) | [GIGA](https://giga.global/) UNICEF + ITU school registry (177K schools across 5 countries; bulk CSV downloads from maps.giga.global) | CC BY 4.0 |
 | Health facilities (Nigeria-specific) | [GRID3 NGA Health Facilities v2.0](https://doi.org/10.7916/kv1n-0743) (CIESIN / Columbia University, incorporates NHFR 2024) | CC BY 4.0 |
 | Heat, flood, drought | [Open-Meteo](https://open-meteo.com) ERA5 archive (daily heat-index, precipitation, dry-run days) | CC-BY |
 | Air quality (PM2.5, NO₂) | [Open-Meteo Air Quality](https://open-meteo.com/en/docs/air-quality-api) (CAMS) | CC-BY |
@@ -122,9 +123,9 @@ MIT — use it, fork it, run it for your country, improve it.
 
 ## Status
 
-**Prototype — v0.6.1.** Five countries shipped (Nigeria, Bangladesh, Guatemala, Kenya, Philippines), 152,378 facilities scored, three viewing modes (2D dashboard, 3D globe, WebXR VR). Methodology tightens as we onboard more countries.
+**Prototype — v0.6.3.** Five countries shipped (Nigeria, Bangladesh, Guatemala, Kenya, Philippines), 311,669 facilities scored, three viewing modes (2D dashboard, 3D globe, WebXR VR). Methodology tightens as we onboard more countries.
 
-**Climate data (v0.6.1):** ERA5 bulk downloads from Copernicus CDS, multi-year averaged (2024 + 2025) per facility. This sidesteps Open-Meteo's archive API rate-limit dependency entirely AND smooths out single-year climate variability (e.g. 2025's La Niña understated drought in tropical Pacific countries). Heat-index is computed indoors via NOAA Rothfusz from T + dewpoint — more relevant for child welfare since kids spend most of the day in classrooms, not direct sun.
+**Climate data (v0.6.3):** ERA5 bulk downloads from Copernicus CDS, multi-year averaged (2024 + 2025) per facility. This sidesteps Open-Meteo's archive API rate-limit dependency entirely AND smooths out single-year climate variability (e.g. 2025's La Niña understated drought in tropical Pacific countries). Heat-index is computed indoors via NOAA Rothfusz from T + dewpoint — more relevant for child welfare since kids spend most of the day in classrooms, not direct sun.
 
 **Concentration-bonus scoring (v0.6):** `score = 100 * (weighted_sum + 0.10 * max_hazard * (max_hazard - mean_hazard))`. Surfaces facilities where ONE hazard is extreme even if others aren't. Without this, Kenya's ASAL counties (270+ heat-index days/yr) would be capped at ~70 by the pure additive model and never reach SEVERE despite being unmistakably extreme on the hazards that actually apply. The bonus is small when hazards are evenly elevated (broadly-high sites) and large when one hazard dominates.
 

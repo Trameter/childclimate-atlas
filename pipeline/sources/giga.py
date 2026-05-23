@@ -23,9 +23,11 @@ Healthsites only — the integration is opt-in, never blocking.
 """
 from __future__ import annotations
 
+import csv
 import json
 import os
 import time
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import requests
@@ -34,6 +36,12 @@ from dotenv import load_dotenv
 from ..config import RAW_DIR
 
 load_dotenv()
+
+# Bulk CSV ingestion lives next to the API path. Drop GIGA's UI download
+# files (e.g. School_report_page_N_out_of_M_dated_*.csv) into this dir and
+# they'll be picked up automatically by build.py via fetch_bulk_csvs(),
+# preferred over the API. Same play as data/raw/healthsites/World.zip.
+BULK_CSV_DIR = RAW_DIR / "giga"
 
 # GIGA's modern API is served from this Azure-hosted backend. The
 # canonical "api.giga.global" hostname has been intermittent in our probes;
@@ -189,6 +197,90 @@ def fetch(config, cache: bool = True) -> List[Dict]:
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(json.dumps(normalized, indent=2))
     return normalized
+
+
+def fetch_bulk_csvs(config) -> List[Dict]:
+    """Read all CSVs in data/raw/giga/ and return facility records matching
+    `config.iso3`. The directory may hold multiple countries' files
+    side-by-side; the per-row "Country ISO3 Code" column is the filter.
+
+    GIGA's UI bulk-download produces files like:
+        School_report_page_1_out_of_6_dated_23052026_193813.csv
+    Multiple pages per country; we glob all of them, dedupe by Giga UUID
+    (the same school can appear in two pages if the user re-downloaded),
+    and emit facility dicts in our standard shape.
+
+    Returns [] if no CSVs are present or no rows match the requested ISO3
+    — caller should fall through to the API path in fetch().
+
+    Expected schema (case-sensitive headers, what the GIGA UI exports):
+      School Giga ID, School Name, Longitude, Latitude,
+      Education Level, Country ISO3 Code, Country Name, School Data Source
+    """
+    if not BULK_CSV_DIR.exists():
+        return []
+    target_iso = config.iso3.upper()
+    seen_ids: set = set()
+    facilities: List[Dict] = []
+    csv_files = sorted(p for p in BULK_CSV_DIR.glob("*.csv") if not p.name.startswith("."))
+    if not csv_files:
+        return []
+    for csv_path in csv_files:
+        try:
+            # newline='' is correct for csv.DictReader on macOS — handles
+            # any line-ending convention without splitting embedded newlines
+            # in quoted fields.
+            with open(csv_path, "r", encoding="utf-8", newline="") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if (row.get("Country ISO3 Code") or "").strip().upper() != target_iso:
+                        continue
+                    giga_id = (row.get("School Giga ID") or "").strip()
+                    if not giga_id or giga_id in seen_ids:
+                        continue
+                    seen_ids.add(giga_id)
+                    try:
+                        lat = float((row.get("Latitude") or "").strip())
+                        lon = float((row.get("Longitude") or "").strip())
+                    except ValueError:
+                        continue
+                    # Reject 0,0 (often a missing-data sentinel in school
+                    # registries) and any nonsensical coords.
+                    if abs(lat) < 1e-6 and abs(lon) < 1e-6:
+                        continue
+                    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+                        continue
+                    name = (row.get("School Name") or "").strip() or "Unnamed school"
+                    edu_level = (row.get("Education Level") or "").strip().lower()
+                    source_label = (row.get("School Data Source") or "").strip() or "GIGA UNICEF"
+                    tags: Dict[str, str] = {
+                        "amenity": "school",
+                        "source": source_label,
+                    }
+                    if edu_level:
+                        # Map GIGA's "Primary" / "Pre-Primary" / "Secondary"
+                        # to OSM-style isced:level for downstream filters.
+                        tags["isced:level"] = edu_level
+                    facilities.append({
+                        # "school-giga-" prefix mirrors "school-node-N" / "clinic-way-N"
+                        # so the dedupe-by-id pass in build.py handles GIGA-vs-OSM
+                        # collisions even when the same school shows up in both.
+                        # In practice OSM IDs and GIGA UUIDs never collide so this
+                        # is purely for shape consistency; spatial dedup is the
+                        # real overlap filter (dedup_against_existing).
+                        "id": f"school-giga-{giga_id}",
+                        "lat": lat,
+                        "lon": lon,
+                        "name": name,
+                        "type": "school",
+                        "tags": tags,
+                    })
+        except (OSError, csv.Error) as e:
+            print(f"  [giga] failed to read {csv_path.name}: {e}", flush=True)
+            continue
+    if facilities:
+        print(f"  [giga] bulk CSV: {len(csv_files)} file(s) → {len(facilities):,} {target_iso} schools (deduped by Giga UUID)", flush=True)
+    return facilities
 
 
 def dedup_against_existing(giga_facilities: List[Dict], existing: List[Dict],
