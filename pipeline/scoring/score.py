@@ -34,8 +34,18 @@ def _piecewise(value: float, stops: List[Tuple[float, float]]) -> float:
 
 
 def heat_subscore(heat_index_days: float) -> float:
-    # Anchors: 0 days = 0, 30 days = 0.5, 90 days = 0.9, 180+ = 1.0.
-    return _piecewise(heat_index_days, [(0, 0), (30, 0.5), (90, 0.9), (180, 1.0)])
+    # Anchors recalibrated in v0.6.1 for the indoor heat-index methodology
+    # (NOAA Rothfusz from T + dewpoint, no solar term — see era5_bulk.py
+    # HEAT_INDEX_THRESHOLD_C docstring). At threshold 30°C indoor:
+    #   - 0 days   = 0      (highland temperate climates)
+    #   - 60 days  = 0.40   (seasonal hot spell)
+    #   - 180 days = 0.70   (half-year tropical)
+    #   - 300+     = 1.00   (Sahel, ASAL, near-year-round tropical)
+    # Old anchors (0/30/90/180) were calibrated for Open-Meteo's outdoor
+    # apparent_temperature_max with solar — at the new indoor methodology
+    # those would saturate every tropical lowland at 1.0 and lose all
+    # differentiation between "hot" and "extreme".
+    return _piecewise(heat_index_days, [(0, 0), (60, 0.4), (180, 0.7), (300, 1.0)])
 
 
 def flood_subscore(heavy_precip_days: float) -> float:

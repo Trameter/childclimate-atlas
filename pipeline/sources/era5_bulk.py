@@ -38,13 +38,30 @@ except ImportError:
 
 from ..config import RAW_DIR
 
-# Years we look for (newest first — we prefer 2025 data; 2024 used as
-# fallback if 2025 isn't on disk yet).
-ERA5_YEARS_PREFERENCE = [2025, 2024]
+# Years we look for. We load ALL years that have a complete file set
+# (t2m_max + d2m_mean + tp_sum) and average summary stats across them
+# at facility-summarize time. Multi-year averaging dampens single-year
+# climate variability — e.g. 2025's La Niña understated drought in the
+# tropical Pacific countries, and a 2024+2025 average is more
+# representative of the chronic exposure children actually face.
+#
+# A facility's summary becomes the mean of per-year counts (heat days,
+# heavy-precip days) and the mean of per-year longest-dry-runs. Years
+# missing any of the 3 variables are skipped entirely (no half-year
+# blending into the average).
+ERA5_YEARS_TO_TRY = [2024, 2025]
 
-# Threshold constants — kept in lockstep with climate.py._summarize so the
-# Open-Meteo path and the bulk path produce identical scoring semantics.
-HEAT_INDEX_THRESHOLD_C = 35.0
+# Threshold constants.
+#
+# HEAT_INDEX_THRESHOLD_C = 30 (NOT 35) because we compute INDOOR heat
+# index from T_2m + dewpoint via NOAA Rothfusz — no solar-radiation term.
+# Open-Meteo's apparent_temperature_max DOES include solar radiation, so
+# the same atmospheric conditions read 5-10°C higher in their outdoor
+# "feels like in the sun" formulation. Setting our threshold at 30°C
+# indoor heat index ≈ Open-Meteo's 35°C outdoor apparent temp, and is
+# arguably more relevant for child welfare (kids spend most of the day
+# in classrooms, not direct sun).
+HEAT_INDEX_THRESHOLD_C = 30.0
 HEAVY_PRECIP_THRESHOLD_MM = 50.0
 DRY_DAY_THRESHOLD_MM = 1.0
 
@@ -96,31 +113,68 @@ def _longest_run_below(values, threshold):
     return longest
 
 
+class _ERA5YearData:
+    """One year's worth of T_max + dewpoint_mean + precipitation_sum
+    arrays, eager-loaded into numpy for fast per-facility indexing."""
+
+    def __init__(self, year: int, t_max_arr, d_mean_arr, tp_sum_arr,
+                 lats, lons, lon_is_0_360: bool):
+        self.year = year
+        self.t_max_arr = t_max_arr      # shape (time, lat, lon), Kelvin
+        self.d_mean_arr = d_mean_arr    # Kelvin
+        self.tp_sum_arr = tp_sum_arr    # meters
+        self.lats = lats
+        self.lons = lons
+        self.lon_is_0_360 = lon_is_0_360
+
+    def nearest(self, lat: float, lon: float) -> Tuple[int, int]:
+        if self.lon_is_0_360 and lon < 0:
+            lon = lon + 360.0
+        return (int(np.abs(self.lats - lat).argmin()),
+                int(np.abs(self.lons - lon).argmin()))
+
+    def summary_for_point(self, lat: float, lon: float) -> Optional[Dict[str, int]]:
+        """Per-year per-cell summary in the same shape as climate.py's
+        _summarize. Returns None if the cell has no valid days (rare —
+        only for pure-ocean cells at very high latitudes)."""
+        i, j = self.nearest(lat, lon)
+        t_K = self.t_max_arr[:, i, j]
+        d_K = self.d_mean_arr[:, i, j]
+        tp_m = self.tp_sum_arr[:, i, j]
+        valid = ~(np.isnan(t_K) | np.isnan(d_K) | np.isnan(tp_m))
+        t_K, d_K, tp_m = t_K[valid], d_K[valid], tp_m[valid]
+        if t_K.size == 0:
+            return None
+        t_c = t_K - 273.15
+        d_c = d_K - 273.15
+        tp_mm = tp_m * 1000.0
+        rh = _rh_from_t_dewpoint(t_c, d_c)
+        apparent_c = _heat_index_c(t_c, rh)
+        return {
+            "heat_index_days": int(np.sum(apparent_c >= HEAT_INDEX_THRESHOLD_C)),
+            "heavy_precip_days": int(np.sum(tp_mm >= HEAVY_PRECIP_THRESHOLD_MM)),
+            "longest_dry_run_days": int(_longest_run_below(tp_mm, DRY_DAY_THRESHOLD_MM)),
+        }
+
+
 class _ERA5Cache:
-    """Lazy-loaded singleton — opens the three NetCDF files once, reuses
-    across all facility lookups. The xarray open is fast (mmap-style); the
-    cost is the per-cell .isel() which we do once per facility."""
+    """Lazy-loaded singleton — opens NetCDFs for ALL years that have a
+    complete file set (t2m_max + d2m_mean + tp_sum), then averages summary
+    stats across years when summarizing a facility. Multi-year averaging
+    dampens single-year climate variability (La Niña, El Niño, one-off
+    heatwaves) and produces a more representative chronic-exposure score
+    than any single year."""
 
     def __init__(self):
         self._loaded = False
-        self.year = None
-        self.t_max = None
-        self.d_mean = None
-        self.tp_sum = None
-        self.t_max_arr = None     # eager-loaded numpy view for speed
-        self.d_mean_arr = None
-        self.tp_sum_arr = None
-        self.lats = None
-        self.lons = None
+        self.years: List[_ERA5YearData] = []
 
     def load(self) -> bool:
-        """Try to open the bulk NetCDFs. Returns True on success, False
-        if no year has all 3 files on disk yet (caller falls back to API)."""
         if self._loaded:
             return True
         if not _XARRAY_AVAILABLE:
             return False
-        for year in ERA5_YEARS_PREFERENCE:
+        for year in ERA5_YEARS_TO_TRY:
             d = RAW_DIR / f"era5_{year}"
             paths = {
                 "t_max": d / f"era5_{year}_t2m_max.nc",
@@ -130,78 +184,57 @@ class _ERA5Cache:
             if not all(p.exists() for p in paths.values()):
                 continue
             t0 = time.time()
-            print(f"  [era5] loading bulk cache for {year}: "
+            print(f"  [era5] loading {year} cache: "
                   f"{sum(p.stat().st_size for p in paths.values()) / 1024**2:.0f} MB total", flush=True)
-            self.t_max = xr.open_dataset(paths["t_max"])
-            self.d_mean = xr.open_dataset(paths["d_mean"])
-            self.tp_sum = xr.open_dataset(paths["tp_sum"])
-            # ERA5 daily-statistics NetCDFs typically have one data variable
-            # per file (t2m, d2m, tp respectively). Pick the first one
-            # robustly rather than hardcoding the name.
-            t_var = list(self.t_max.data_vars)[0]
-            d_var = list(self.d_mean.data_vars)[0]
-            tp_var = list(self.tp_sum.data_vars)[0]
-            # Eager-load into memory — at 0.25° resolution × 365 days × 1
-            # variable, each grid is ~700K cells × 365 days = ~1GB per
-            # variable. xarray will mmap; .values forces a load for fast
-            # per-facility indexing.
-            self.t_max_arr = self.t_max[t_var].values     # shape (time, lat, lon), Kelvin
-            self.d_mean_arr = self.d_mean[d_var].values   # Kelvin
-            self.tp_sum_arr = self.tp_sum[tp_var].values  # meters
-            # Coordinate arrays. ERA5 usually has latitude descending
-            # (90 → -90) and longitude in 0-360. We handle both conventions.
-            lat_name = "latitude" if "latitude" in self.t_max.coords else "lat"
-            lon_name = "longitude" if "longitude" in self.t_max.coords else "lon"
-            self.lats = self.t_max[lat_name].values
-            self.lons = self.t_max[lon_name].values
-            # Whether longitudes are stored as [0, 360) (need wrap for
-            # facilities at negative lon) or [-180, 180].
-            self._lon_is_0_360 = (self.lons.min() >= 0 and self.lons.max() > 180)
-            self.year = year
-            self._loaded = True
-            print(f"  [era5] loaded {year} cache in {time.time() - t0:.1f}s; "
-                  f"grid {len(self.lats)} × {len(self.lons)} = {len(self.lats) * len(self.lons):,} cells; "
-                  f"{self.t_max_arr.shape[0]} days", flush=True)
-            return True
-        return False
-
-    def _nearest(self, lat: float, lon: float) -> Tuple[int, int]:
-        """Nearest grid-cell indices on the 1D coord arrays."""
-        if self._lon_is_0_360 and lon < 0:
-            lon = lon + 360.0
-        lat_idx = int(np.abs(self.lats - lat).argmin())
-        lon_idx = int(np.abs(self.lons - lon).argmin())
-        return lat_idx, lon_idx
+            t_ds = xr.open_dataset(paths["t_max"])
+            d_ds = xr.open_dataset(paths["d_mean"])
+            tp_ds = xr.open_dataset(paths["tp_sum"])
+            t_var = list(t_ds.data_vars)[0]
+            d_var = list(d_ds.data_vars)[0]
+            tp_var = list(tp_ds.data_vars)[0]
+            t_arr = t_ds[t_var].values
+            d_arr = d_ds[d_var].values
+            tp_arr = tp_ds[tp_var].values
+            lat_name = "latitude" if "latitude" in t_ds.coords else "lat"
+            lon_name = "longitude" if "longitude" in t_ds.coords else "lon"
+            lats = t_ds[lat_name].values
+            lons = t_ds[lon_name].values
+            lon_is_0_360 = (lons.min() >= 0 and lons.max() > 180)
+            self.years.append(_ERA5YearData(year, t_arr, d_arr, tp_arr,
+                                            lats, lons, lon_is_0_360))
+            print(f"  [era5]   loaded {year} in {time.time() - t0:.1f}s; "
+                  f"grid {len(lats)} × {len(lons)}; {t_arr.shape[0]} days", flush=True)
+        if not self.years:
+            return False
+        self._loaded = True
+        loaded_years = ", ".join(str(y.year) for y in self.years)
+        avg_note = " (averaged across years)" if len(self.years) > 1 else ""
+        print(f"  [era5] active years: {loaded_years}{avg_note}", flush=True)
+        return True
 
     def summarize_for_point(self, lat: float, lon: float) -> Dict[str, int]:
-        i, j = self._nearest(lat, lon)
-        # Daily timeseries for this grid cell across the year.
-        t_K = self.t_max_arr[:, i, j]
-        d_K = self.d_mean_arr[:, i, j]
-        tp_m = self.tp_sum_arr[:, i, j]
-        # Mask out NaN / fill-value sentinels (rare on global grids but
-        # ERA5 occasionally has missing days at polar / coastal edges).
-        valid = ~(np.isnan(t_K) | np.isnan(d_K) | np.isnan(tp_m))
-        t_K = t_K[valid]
-        d_K = d_K[valid]
-        tp_m = tp_m[valid]
-        if t_K.size == 0:
+        """Mean of per-year summaries. Counts (heat-index days, heavy
+        precip days) average across years cleanly. longest_dry_run_days
+        averages too — it's a real-valued severity metric of "longest
+        seasonal dry stretch", so averaging two years' max-runs gives
+        an honest "typical worst dry spell" value rather than picking
+        the more-extreme year arbitrarily."""
+        per_year = [y.summary_for_point(lat, lon) for y in self.years]
+        per_year = [s for s in per_year if s is not None]
+        if not per_year:
             return {"heat_index_days": 0, "heavy_precip_days": 0, "longest_dry_run_days": 0}
-        # Unit conversions.
-        t_c = t_K - 273.15
-        d_c = d_K - 273.15
-        tp_mm = tp_m * 1000.0
-        # Heat-index days.
-        rh = _rh_from_t_dewpoint(t_c, d_c)
-        apparent_c = _heat_index_c(t_c, rh)
-        heat_index_days = int(np.sum(apparent_c >= HEAT_INDEX_THRESHOLD_C))
-        heavy_precip_days = int(np.sum(tp_mm >= HEAVY_PRECIP_THRESHOLD_MM))
-        longest_dry = _longest_run_below(tp_mm, DRY_DAY_THRESHOLD_MM)
+        n = len(per_year)
         return {
-            "heat_index_days": heat_index_days,
-            "heavy_precip_days": heavy_precip_days,
-            "longest_dry_run_days": int(longest_dry),
+            "heat_index_days": int(round(sum(s["heat_index_days"] for s in per_year) / n)),
+            "heavy_precip_days": int(round(sum(s["heavy_precip_days"] for s in per_year) / n)),
+            "longest_dry_run_days": int(round(sum(s["longest_dry_run_days"] for s in per_year) / n)),
         }
+
+    # Back-compat property: callers that read `cache.year` for logging
+    # now see a comma-joined list (e.g. "2024+2025") instead of one int.
+    @property
+    def year(self) -> str:
+        return "+".join(str(y.year) for y in self.years) if self.years else "none"
 
 
 _cache_singleton: Optional[_ERA5Cache] = None

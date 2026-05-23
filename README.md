@@ -122,9 +122,11 @@ MIT — use it, fork it, run it for your country, improve it.
 
 ## Status
 
-**Prototype — v0.6.** Five countries shipped (Nigeria, Bangladesh, Guatemala, Kenya, Philippines), 152,378 facilities scored, three viewing modes (2D dashboard, 3D globe, WebXR VR). Methodology tightens as we onboard more countries.
+**Prototype — v0.6.1.** Five countries shipped (Nigeria, Bangladesh, Guatemala, Kenya, Philippines), 152,378 facilities scored, three viewing modes (2D dashboard, 3D globe, WebXR VR). Methodology tightens as we onboard more countries.
 
-Latest scoring methodology change (v0.6): a **concentration bonus** that rewards monospecific extreme-hazard sites — `score = 100 * (weighted_sum + 0.10 * max_hazard * (max_hazard - mean_hazard))`. Without this, a school with a single maxed hazard (e.g. Kenya's ASAL counties at 270+ heat-index days/yr) would be capped at ~70 by the pure additive model and never surface as SEVERE despite being unmistakably extreme on the hazards that actually apply. The bonus is small when hazards are evenly elevated (broadly-high sites) and large when one hazard dominates.
+**Climate data (v0.6.1):** ERA5 bulk downloads from Copernicus CDS, multi-year averaged (2024 + 2025) per facility. This sidesteps Open-Meteo's archive API rate-limit dependency entirely AND smooths out single-year climate variability (e.g. 2025's La Niña understated drought in tropical Pacific countries). Heat-index is computed indoors via NOAA Rothfusz from T + dewpoint — more relevant for child welfare since kids spend most of the day in classrooms, not direct sun.
+
+**Concentration-bonus scoring (v0.6):** `score = 100 * (weighted_sum + 0.10 * max_hazard * (max_hazard - mean_hazard))`. Surfaces facilities where ONE hazard is extreme even if others aren't. Without this, Kenya's ASAL counties (270+ heat-index days/yr) would be capped at ~70 by the pure additive model and never reach SEVERE despite being unmistakably extreme on the hazards that actually apply. The bonus is small when hazards are evenly elevated (broadly-high sites) and large when one hazard dominates.
 
 Contributions welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
