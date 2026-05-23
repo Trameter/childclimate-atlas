@@ -1,3 +1,7 @@
 requests>=2.31.0
 pyyaml>=6.0
 python-dotenv>=1.0.0
+pyshp>=2.3.0          # Healthsites bulk shapefile slicer
+cdsapi>=0.7.0         # ERA5 bulk climate download (scripts/download_era5_2025.py)
+xarray>=2024.0.0      # NetCDF read for ERA5 (pipeline/sources/era5_bulk.py)
+netCDF4>=1.7.0        # xarray's underlying NetCDF engine

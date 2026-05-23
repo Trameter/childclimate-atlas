@@ -18,7 +18,9 @@ from .config import load_country, CountryConfig, PROCESSED_DIR
 from .sources import facilities as facilities_src
 from .sources import grid3 as grid3_src
 from .sources import healthsites as healthsites_src
+from .sources import era5_bulk as era5_bulk_src
 from .sources import climate as climate_src
+from .sources import nasa_power as nasa_power_src
 from .sources import air_quality as air_src
 from .sources import geocode as geocode_src
 from .scoring.score import score_all
@@ -79,7 +81,7 @@ def _to_geojson(scored: List[Dict], country: CountryConfig) -> Dict:
     }
 
 
-def build(iso3: str, limit: int | None = None, fresh: bool = False, full: bool = False, stride_override: int | None = None) -> Dict:
+def build(iso3: str, limit: int | None = None, fresh: bool = False, full: bool = False, stride_override: int | None = None, climate_source: str = "open-meteo") -> Dict:
     config = load_country(iso3)
     if full:
         _log(f"Building FULL COUNTRY atlas for {config.name} ({config.iso3})")
@@ -163,8 +165,25 @@ def build(iso3: str, limit: int | None = None, fresh: bool = False, full: bool =
         _log(f"  using sample stride {stride} for {n} facilities "
              f"(~{n // stride} climate + {n // stride} air samples)")
 
-    _log("Fetching climate indicators via Open-Meteo...")
-    climate_by_id = climate_src.fetch_for_facilities(all_facilities, sample_stride=stride)
+    # Climate provider preference (highest priority first):
+    #   1. Local ERA5 bulk cache (data/raw/era5_YEAR/*.nc) — instant,
+    #      no network, no rate limits. Downloaded once via
+    #      scripts/download_era5_2025.py. Same ERA5 data Open-Meteo wraps,
+    #      so identical scoring semantics.
+    #   2. NASA POWER API (MERRA-2) — when --climate-source nasa-power.
+    #   3. Open-Meteo archive API — historic default.
+    # The bulk cache check is automatic and silent if files aren't on disk,
+    # so existing builds with no ERA5 cache fall through to the API path
+    # transparently.
+    _log("Fetching climate indicators...")
+    climate_by_id = era5_bulk_src.fetch_for_facilities(all_facilities)
+    if not climate_by_id:
+        if climate_source == "nasa-power":
+            _log("  no local ERA5 bulk cache — using NASA POWER")
+            climate_by_id = nasa_power_src.fetch_for_facilities(all_facilities, sample_stride=stride)
+        else:
+            _log("  no local ERA5 bulk cache — using Open-Meteo")
+            climate_by_id = climate_src.fetch_for_facilities(all_facilities, sample_stride=stride)
     _log(f"  climate summaries for {len(climate_by_id)} facilities")
 
     _log("Fetching air quality via CAMS...")
@@ -229,9 +248,15 @@ def main():
                     help="Override the auto-computed climate/AQ sample stride. "
                          "Lower = denser grid = more accurate but slower (more API fetches). "
                          "For NGA: default 100, finer 50 populates the SEVERE band properly.")
+    ap.add_argument("--climate-source", choices=["open-meteo", "nasa-power"], default="open-meteo",
+                    help="Which climate-history API to use. open-meteo (ERA5, default) is "
+                         "higher resolution but throttles aggressively if you hammer it. "
+                         "nasa-power (MERRA-2) is a drop-in fallback that's free + generous + "
+                         "doesn't share Open-Meteo's daily quota.")
     args = ap.parse_args()
     try:
-        build(args.country, limit=args.limit, fresh=args.fresh, full=args.full, stride_override=args.stride)
+        build(args.country, limit=args.limit, fresh=args.fresh, full=args.full,
+              stride_override=args.stride, climate_source=args.climate_source)
     except KeyboardInterrupt:
         sys.exit(130)
 
