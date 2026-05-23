@@ -49,8 +49,18 @@ def heat_subscore(heat_index_days: float) -> float:
 
 
 def flood_subscore(heavy_precip_days: float) -> float:
-    # Anchors: 0 = 0, 5 = 0.4, 15 = 0.8, 30+ = 1.0.
-    return _piecewise(heavy_precip_days, [(0, 0), (5, 0.4), (15, 0.8), (30, 1.0)])
+    # Anchors recalibrated in v0.6.2 — the original (30 days = 1.0) anchor
+    # was over-conservative: nowhere in our 5 countries actually hits 30
+    # heavy-precip days/yr in the multi-year ERA5 average. The result was
+    # that flood-dominant Bangladesh's worst facility (PDB high school, 19
+    # heavy days/yr) capped its flood subscore at 0.85, leaving its risk
+    # score at 74.2 — one point under SEVERE — even with the concentration
+    # bonus stacked on top. 25-day max is defensible: it's the actual upper
+    # bound of observed extreme flood frequency, and past that the
+    # marginal child-welfare risk plateaus (a facility that's already
+    # perpetually inundated doesn't get linearly worse with more rain).
+    # New anchors: 0=0, 5=0.4, 15=0.85, 25+=1.0.
+    return _piecewise(heavy_precip_days, [(0, 0), (5, 0.4), (15, 0.85), (25, 1.0)])
 
 
 def drought_subscore(longest_dry_run_days: float) -> float:
