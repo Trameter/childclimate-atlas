@@ -1156,6 +1156,47 @@ function applyMode(want3D) {
     const href = btn.getAttribute("href");
     btn.classList.toggle("active", href === (want3D ? "/3d" : "/"));
   });
+
+  // STEP 6 — swap hero-pane copy + page title for the new mode. Without
+  // this, the eyebrow / h1 / blurb stay frozen at whichever HTML file
+  // loaded first (the SPA toggle hops projections + URL but doesn't
+  // re-render the server-rendered hero block). Symptom: load /3d, click
+  // 2D — toggle button flips active but the "Spin the globe" hero still
+  // shows, and vice versa.
+  applyHeroForMode(want3D);
+}
+
+// Source of truth for the hero pane content per mode. Mirrors what's
+// server-rendered in the two HTML files so a first paint from /index.html
+// or /3d/index.html still shows the right thing, and applyHeroForMode()
+// swaps to the other set on toggle. Keep these strings in sync with the
+// HTML files — both should match on first paint.
+const HERO_CONTENT = {
+  mode2d: {
+    title: "ChildClimate Risk Atlas — Trameter",
+    eyebrow: "Trameter · Nigeria · MIT",
+    h1: 'Which clinic should we <em>harden first?</em>',
+    p: "A 0–100 climate-risk score for every school and clinic in a country. Built on open data, published under MIT, auditable to source.",
+  },
+  mode3d: {
+    title: "ChildClimate Atlas — Immersive 3D · Trameter",
+    eyebrow: "Trameter · Immersive view · MIT",
+    h1: 'Spin the globe. <em>See the risk.</em>',
+    p: "Every school and clinic, scored 0–100 for climate risk, on a 3D globe. Click any dot to dive in. Same data, different way to feel it.",
+  },
+};
+
+function applyHeroForMode(want3D) {
+  const c = want3D ? HERO_CONTENT.mode3d : HERO_CONTENT.mode2d;
+  const hero = document.querySelector(".hero-pane");
+  if (!hero) return;
+  const eyebrowMono = hero.querySelector(".eyebrow .mono");
+  if (eyebrowMono) eyebrowMono.textContent = c.eyebrow;
+  const h1 = hero.querySelector("h1");
+  if (h1) h1.innerHTML = c.h1;
+  const p = hero.querySelector("p");
+  if (p) p.textContent = c.p;
+  document.title = c.title;
 }
 
 // ---- 3D pulse animation on the most-critical facilities ----
