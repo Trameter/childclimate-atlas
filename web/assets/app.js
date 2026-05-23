@@ -657,7 +657,7 @@ function sphericalDistance(a, b) {
 //
 // Only meaningful in 3D — in 2D the arc would be a flat chord across a
 // flat map. A new country switch cancels any pending clear timer.
-function showCountryTrail(from, to, holdMs = 6500) {
+function showCountryTrail(from, to, holdMs = 12000) {
   if (!IS_3D) return;
   const src = map.getSource("country-trail");
   if (!src) return;
@@ -2815,6 +2815,16 @@ async function switchCountry(iso3) {
     center: v.center,
     zoom: IS_3D ? Math.max(v.zoom - 1.5, 3) : v.zoom,
   });
+
+  // At 311K facilities the loadAtlas + setData pipeline stalls the main
+  // thread for several seconds when switching countries — long enough that
+  // a synchronously-set trail can get queued behind the stall and miss its
+  // first paint window entirely. Yielding to the browser for two RAF cycles
+  // guarantees the trail's setData commits to a real render frame BEFORE
+  // the heavy data work starts, so the user actually sees the arc draw.
+  if (willAnimateTrail) {
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  }
 
   // --- 2. ASYNC DATA FETCH (with streaming progress) ---------------------
   // Kick the fetch off in parallel with the flyTo so by the time the

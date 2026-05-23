@@ -47,7 +47,10 @@ def _to_geojson(scored: List[Dict], country: CountryConfig) -> Dict:
                 "tags": f.get("tags", {}),
                 "risk_score": f["risk"]["score"],
                 "risk_components": f["risk"]["components"],
-                "risk_contributions": f["risk"]["contributions"],
+                # risk_contributions dropped in v0.6.4 — derivable in
+                # frontend from risk_components × country weights, and
+                # zero current consumers were reading the field. Saves
+                # ~15-30 MB total across the 5-country geojson set.
                 "top_drivers": f["risk"]["top_drivers"],
                 "recommendations": f["risk"].get("recommendations", []),
                 "climate": f.get("climate", {}),
