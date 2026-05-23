@@ -34,6 +34,7 @@ sources:
   open_meteo: true          # ERA5 climate via Open-Meteo
   air_quality: true         # CAMS regional air-quality
   worldpop: false           # Disabled in v0.2 across all countries
+  giga: true                # GIGA UNICEF school registry — silent skip if no API key in .env
   grid3: false              # GRID3 is NGA-specific; no-op elsewhere
 
 # Scoring weights — sum to 1.0

@@ -19,6 +19,7 @@ from .sources import facilities as facilities_src
 from .sources import grid3 as grid3_src
 from .sources import healthsites as healthsites_src
 from .sources import era5_bulk as era5_bulk_src
+from .sources import giga as giga_src
 from .sources import climate as climate_src
 from .sources import nasa_power as nasa_power_src
 from .sources import air_quality as air_src
@@ -108,6 +109,24 @@ def build(iso3: str, limit: int | None = None, fresh: bool = False, full: bool =
             new_hs = [f for f in hs_facilities if f["id"] not in existing_ids]
             _log(f"  Healthsites: {len(hs_facilities)} total, {len(new_hs)} net-new after dedupe")
             all_facilities = all_facilities + new_hs
+
+    # Optional: merge GIGA UNICEF school registry. School-only source —
+    # OSM under-coverage of schools is the main gap in BGD/KEN/GTM/PHL.
+    # GIGA records have their own ID space (not OSM ids), so we dedup
+    # spatially (150m radius vs existing schools). Requires GIGA_API_KEY
+    # in env — silent skip if not configured.
+    if config.sources.get("giga"):
+        _log("Fetching GIGA UNICEF supplementary schools...")
+        giga_facilities = giga_src.fetch(config, cache=not fresh)
+        if giga_facilities:
+            before_dedup = len(giga_facilities)
+            giga_facilities = giga_src.dedup_against_existing(
+                giga_facilities, all_facilities, proximity_m=150.0
+            )
+            dropped = before_dedup - len(giga_facilities)
+            _log(f"  GIGA: {before_dedup} total, dropped {dropped} within 150m of existing schools")
+            _log(f"  merging {len(giga_facilities)} net-new schools")
+            all_facilities = all_facilities + giga_facilities
 
     # Optional: merge GRID3 Nigeria Health Facilities v2.0 (CC BY 4.0).
     # OSM coverage of Nigerian PHCs is uneven (e.g. urban Kano gaps); the

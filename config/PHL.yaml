@@ -29,6 +29,7 @@ sources:
   open_meteo: true
   air_quality: true
   worldpop: false
+  giga: true                # GIGA UNICEF school registry — silent skip if no API key in .env
 
 scoring_weights:
   # Country-specific overrides, same methodology as NGA + BGD + GTM + KEN:
