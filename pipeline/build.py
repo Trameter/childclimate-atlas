@@ -31,6 +31,63 @@ def _log(msg: str) -> None:
     print(f"[build] {msg}", flush=True)
 
 
+def _to_lite_geojson(scored: List[Dict], country: CountryConfig) -> Dict:
+    """Minimal-properties variant of _to_geojson — only the fields the map
+    needs to RENDER + filter + tooltip. Drops the heavy nested fields
+    (tags, risk_components, top_drivers, recommendations, climate, air)
+    that the detail panel uses but the map layer doesn't. The full file
+    is fetched lazily in the background after first-paint, then any
+    facility click rehydrates the detail panel from the cached full record.
+
+    Sizing (NGA, 159K facilities):
+      Full:   292 MB raw / 14 MB gz   → ~5-10s JSON.parse on a fast Mac
+      Lite:   ~30 MB raw / ~3 MB gz   → <1s JSON.parse
+    """
+    features = []
+    for f in scored:
+        tags = f.get("tags") or {}
+        # Flatten the only tag the UI needs at map-layer level — admin1 (or
+        # OSM addr:state as fallback) for state filtering. Avoids shipping
+        # the full tags object on every feature.
+        state_name = tags.get("admin1") or tags.get("addr:state") or ""
+        clim = f.get("climate") or {}
+        air = f.get("air") or {}
+        features.append({
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [f["lon"], f["lat"]],
+            },
+            "properties": {
+                "id": f["id"],
+                "name": f["name"],
+                "facility_type": f["type"],
+                "risk_score": f["risk"]["score"],
+                "state_name": state_name,
+                # Flat heatmap / hazard-overlay inputs — needed by the
+                # MapLibre paint expressions for the heatmap layer and
+                # the hazard-color circle overrides. Including them in
+                # lite means the heatmap toggle works without forcing
+                # the full data fetch. ~50 bytes per facility extra.
+                "heat_index_days": clim.get("heat_index_days", 0),
+                "longest_dry_run_days": clim.get("longest_dry_run_days", 0),
+                "heavy_precip_days": clim.get("heavy_precip_days", 0),
+                "pm25_avg_ugm3": air.get("pm25_avg_ugm3", 0),
+            },
+        })
+    return {
+        "type": "FeatureCollection",
+        "metadata": {
+            "country": country.name,
+            "iso3": country.iso3,
+            "facility_count": len(features),
+            "variant": "lite",
+            "full_data_path": f"/data/{country.iso3}.geojson",
+        },
+        "features": features,
+    }
+
+
 def _to_geojson(scored: List[Dict], country: CountryConfig) -> Dict:
     features = []
     for f in scored:
@@ -259,6 +316,22 @@ def build(iso3: str, limit: int | None = None, fresh: bool = False, full: bool =
     raw_size_mb = web_geojson_path.stat().st_size / 1024 / 1024
     _log(f"  wrote {web_geojson_path.name} ({raw_size_mb:.1f} MB) + "
          f"{gz_path.name} ({gz_size_mb:.2f} MB, {100*gz_size_mb/raw_size_mb:.1f}% of raw)")
+
+    # Two-tier data emission (v0.6.5): a lite variant with only map-render
+    # properties so the dots paint fast on country switch. The full file
+    # above is loaded lazily in the background for detail-panel hydration.
+    lite_geojson = _to_lite_geojson(scored, config)
+    lite_payload = json.dumps(lite_geojson)
+    lite_path = web_data / f"{config.iso3}.lite.geojson"
+    lite_path.write_text(lite_payload)
+    lite_gz_path = web_data / f"{config.iso3}.lite.geojson.gz"
+    with gzip.open(lite_gz_path, "wb", compresslevel=9) as gz:
+        gz.write(lite_payload.encode("utf-8"))
+    lite_gz_mb = lite_gz_path.stat().st_size / 1024 / 1024
+    lite_raw_mb = lite_path.stat().st_size / 1024 / 1024
+    _log(f"  wrote {lite_path.name} ({lite_raw_mb:.1f} MB) + "
+         f"{lite_gz_path.name} ({lite_gz_mb:.2f} MB) — "
+         f"{100*lite_raw_mb/raw_size_mb:.0f}% of full raw size")
 
     # Top 10 risk summary for the application narrative
     top = scored[:10]

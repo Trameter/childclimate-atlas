@@ -239,7 +239,16 @@ function applyActiveCountryOpacity(activeIso) {
 // In-memory cache + browser HTTP cache + background prefetch.
 // Also: stream the response body so the user sees live progress instead of
 // staring at a frozen "Loading…" label for Bangladesh's 20 MB file.
+// Two-tier cache (v0.6.5):
+//   liteCache holds map-render data (id/coords/score/type/state + the 4
+//     heatmap numeric inputs) — fetched immediately on country switch.
+//   dataCache holds the full per-facility detail (tags, risk_components,
+//     recommendations, climate, air) — fetched lazily on first facility
+//     click in each country, then cached for the rest of the session.
+// Both share the same inflight Map keyed by `${iso3}::${variant}` so
+// rapid double-switches don't double-fetch.
 const dataCache = new Map();
+const liteCache = new Map();
 const inflight = new Map();
 
 // Ballpark uncompressed sizes (used only when the server sends a compressed
@@ -250,6 +259,16 @@ const APPROX_UNCOMPRESSED_BYTES = {
   NGA: 11_000_000,
   BGD: 20_000_000,
   GTM:  2_700_000,
+};
+// Approx uncompressed sizes of the .lite.geojson files — much smaller
+// because they drop the heavy nested properties (tags, recommendations,
+// risk_components, full climate/air objects).
+const APPROX_UNCOMPRESSED_LITE_BYTES = {
+  NGA: 30_000_000,
+  BGD:  3_500_000,
+  GTM:  6_000_000,
+  KEN:  8_000_000,
+  PHL: 14_000_000,
 };
 
 function onLoadProgress(iso3, received, total) {
@@ -269,15 +288,18 @@ function onLoadProgress(iso3, received, total) {
   if (hudC) hudC.textContent = msg;
 }
 
-async function loadAtlas(iso3, { showProgress = false } = {}) {
-  if (dataCache.has(iso3)) return dataCache.get(iso3);
-  if (inflight.has(iso3)) return inflight.get(iso3);
+async function loadAtlas(iso3, { showProgress = false, lite = false } = {}) {
+  const cache = lite ? liteCache : dataCache;
+  if (cache.has(iso3)) return cache.get(iso3);
+  const key = `${iso3}::${lite ? "lite" : "full"}`;
+  if (inflight.has(key)) return inflight.get(key);
 
   const p = (async () => {
     try {
       // Absolute path so the same module works from /3d/ (where ./ would
       // resolve to /3d/data/X.geojson and 404).
-      const r = await fetch(`/data/${iso3}.geojson`);
+      const url = lite ? `/data/${iso3}.lite.geojson` : `/data/${iso3}.geojson`;
+      const r = await fetch(url);
       if (!r.ok) throw new Error(r.status);
 
       // If the server is sending gzipped content, the Content-Length header
@@ -285,8 +307,9 @@ async function loadAtlas(iso3, { showProgress = false } = {}) {
       // Detect that case and use our approximate uncompressed size instead.
       const encoded = (r.headers.get("content-encoding") || "").toLowerCase();
       const clHeader = Number(r.headers.get("content-length")) || 0;
+      const sizeMap = lite ? APPROX_UNCOMPRESSED_LITE_BYTES : APPROX_UNCOMPRESSED_BYTES;
       const total = (encoded && (encoded.includes("gzip") || encoded.includes("br") || encoded.includes("deflate")))
-        ? (APPROX_UNCOMPRESSED_BYTES[iso3] || 0)
+        ? (sizeMap[iso3] || 0)
         : clHeader;
 
       // Stream to drive the progress indicator.
@@ -308,30 +331,48 @@ async function loadAtlas(iso3, { showProgress = false } = {}) {
       const text = new TextDecoder("utf-8").decode(blob);
       const data = JSON.parse(text);
 
-      dataCache.set(iso3, data);
+      cache.set(iso3, data);
       return data;
     } catch {
       return FALLBACK;
     } finally {
-      inflight.delete(iso3);
+      inflight.delete(key);
     }
   })();
 
-  inflight.set(iso3, p);
+  inflight.set(key, p);
   return p;
 }
 
+// Look up the full version of a feature for the detail panel. If the
+// full data for this country is cached, return the matching feature.
+// Otherwise kick off the full fetch and return null — caller renders
+// a partial detail panel + sets up a re-render when full data lands.
+function getFullFeature(iso3, facilityId) {
+  const fullData = dataCache.get(iso3);
+  if (!fullData) return null;
+  return (fullData.features || []).find(f => f.properties && f.properties.id === facilityId) || null;
+}
+
+// Trigger the full-data fetch for a country (idempotent — no-op if
+// already cached or in-flight). Used by both background prefetch and
+// on-demand fetch when a detail panel needs full data that isn't loaded yet.
+function ensureFullDataLoading(iso3) {
+  return loadAtlas(iso3, { showProgress: false, lite: false });
+}
+
 // After the first country loads, kick off background prefetches of the
-// other countries so subsequent switches are instant. Invoked once from
-// switchCountry on the initial load.
+// other countries' LITE data so subsequent switches paint dots instantly.
+// Full data only gets fetched on demand (first detail-panel click for a
+// given country) to keep memory + bandwidth reasonable.
 let prefetchedOthers = false;
 function prefetchOtherCountries(currentIso3) {
   if (prefetchedOthers) return;
   prefetchedOthers = true;
   ALL_ISOS.forEach(iso3 => {
-    if (iso3 === currentIso3 || dataCache.has(iso3)) return;
-    // Silent background prefetch — no UI progress updates.
-    loadAtlas(iso3, { showProgress: false }).catch(() => {});
+    if (iso3 === currentIso3 || liteCache.has(iso3)) return;
+    // Silent background prefetch (lite only) — no UI progress updates.
+    loadAtlas(iso3, { showProgress: false, lite: true }).catch(() => {});
   });
 }
 
@@ -2138,7 +2179,28 @@ function disposeDetailMinimap() {
 }
 
 function renderDetail(feature) {
-  const p = feature.properties;
+  // v0.6.5 two-tier data: the feature passed in (from a map click) only
+  // has the LITE properties (id/name/score/type/state + heatmap numerics).
+  // The detail panel needs the FULL properties (tags, risk_components,
+  // top_drivers, recommendations, climate, air). Upgrade to the full
+  // feature if it's cached; if not, kick off the full fetch and re-render
+  // when it lands. The lite-only render path below still shows score +
+  // name + band so the user gets immediate feedback while waiting.
+  const lite = feature;
+  const liteId = lite.properties && lite.properties.id;
+  const iso = (lite.properties && lite.properties._iso3) || _currentCountryIso;
+  let p = lite.properties;
+  const full = liteId ? getFullFeature(iso, liteId) : null;
+  if (full) {
+    feature = full;
+    p = full.properties;
+  } else if (iso) {
+    // Trigger full fetch + re-render this exact facility when it lands.
+    ensureFullDataLoading(iso).then(() => {
+      const upgraded = getFullFeature(iso, liteId);
+      if (upgraded) renderDetail(upgraded);
+    }).catch(() => {});
+  }
   const s = p.risk_score;
   const b = band(s);
   const weights = currentData.metadata.scoring_weights || {};
@@ -2827,18 +2889,16 @@ async function switchCountry(iso3) {
   }
 
   // --- 2. ASYNC DATA FETCH (with streaming progress) ---------------------
-  // Kick the fetch off in parallel with the flyTo so by the time the
-  // camera arrives the data is usually already sitting in memory.
-  //
-  // We apply data AS SOON AS IT LANDS, not after the camera settles. The
-  // previous deferred-apply path waited for moveend to keep the trail's
-  // per-frame head update from stalling mid-flight — but in practice that
-  // made dots feel slow to appear after a country switch, especially when
-  // jumping from NGA (large dataset still in memory) to BGD (small + fast
-  // to fetch from cache). User feedback: dot-appearance speed > trail
-  // smoothness. The trail may stutter briefly during the 200-400ms setData
-  // when both render at the same instant, but that beats waiting.
-  const data = await loadAtlas(iso3, { showProgress: true });
+  // v0.6.5 two-tier: await the LITE variant for the map render (small,
+  // fast — ~30 MB raw for NGA, sub-second JSON.parse), then kick the
+  // FULL variant off in the background for detail-panel hydration. Lite
+  // has everything the map needs to render dots + heatmap + filter +
+  // tooltip. Full has tags / risk_components / recommendations etc that
+  // the detail panel needs on facility click.
+  const data = await loadAtlas(iso3, { showProgress: true, lite: true });
+  // Background-fetch the full data so detail-panel clicks 5-30s from now
+  // are instant. Fire-and-forget; no await.
+  ensureFullDataLoading(iso3).catch(() => {});
   currentData = data;
   // In 3D mode, tag this country's features with _iso3 and cache them.
   // Other countries stream in as background loads via loadOtherCountries()
@@ -2910,7 +2970,10 @@ async function loadOtherCountries(activeIso) {
     if (iso === activeIso) continue;
     if (countryDataByIso[iso]) continue;
     try {
-      const data = await loadAtlas(iso, { showProgress: false });
+      // Lite for the multi-country merged 3D view — the map only needs
+      // the render-essentials of context countries. Full data for those
+      // gets fetched if and when the user clicks one of their facilities.
+      const data = await loadAtlas(iso, { showProgress: false, lite: true });
       countryDataByIso[iso] = data;
       tagFeaturesIso(data.features || [], iso);
       flattenClimateAir(data.features || []);
