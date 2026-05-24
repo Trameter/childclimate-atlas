@@ -1620,6 +1620,11 @@ function zoomToFiltered() {
 
 // ---- map layer ----
 let mapUpdateQueued = false;
+// Fingerprint of the last filteredFeatures array passed to setData. Used
+// to skip the expensive MapLibre re-index when country-switching between
+// already-loaded countries (same data, different country tint). See
+// updateMap() for the sig format.
+let _lastSetDataSig = null;
 
 function updateMap() {
   const geojson = { type: "FeatureCollection", features: filteredFeatures };
@@ -1646,10 +1651,29 @@ function updateMap() {
 
   const src = map.getSource("facilities");
   if (src) {
-    src.setData(geojson);
+    // v0.6.6: skip setData when the underlying features haven't actually
+    // changed — country-switch between two already-loaded countries was
+    // calling setData with the same 311K features and triggering MapLibre's
+    // tile re-index (5-30s on the active country switch in 3D), even though
+    // only the country tint was different. Tint update is a paint-property
+    // change that's nearly free; setData is the expensive part.
+    //
+    // Signature uses first+last facility id + total count — cheap to
+    // compute and uniquely fingerprints a stable filteredFeatures array
+    // for our purposes (filter changes always change count or end-of-array
+    // ordering; country prefetch landing changes count).
+    const n = filteredFeatures.length;
+    const sig = n === 0
+      ? "empty"
+      : `${n}::${filteredFeatures[0].properties.id}::${filteredFeatures[n - 1].properties.id}`;
+    if (sig !== _lastSetDataSig) {
+      _lastSetDataSig = sig;
+      src.setData(geojson);
+    }
     // Re-tint the aura on country switch even though we early-return before
     // re-adding any layers — the aura source already exists, only its color
-    // + center need updating.
+    // + center need updating. ALWAYS runs regardless of setData skip
+    // because country tint is what makes the switch visually obvious.
     setCountryAura(_currentCountryIso);
     // Multi-country: keep paint opacity in sync with the active country.
     applyActiveCountryOpacity(_currentCountryIso);
