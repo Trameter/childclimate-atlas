@@ -1371,13 +1371,21 @@ function normalizeStateName(raw, iso3) {
 }
 
 function getState(feature) {
+  // v0.6.5 two-tier data: lite features carry a flat state_name string
+  // (pre-extracted at build time); full features carry the original tags
+  // object with admin1 / addr:state inside. Prefer the lite field — when
+  // both are present they should agree because lite was extracted from
+  // the same tags object. Fallback chain handles every loaded state.
+  const iso3 = currentData?.metadata?.iso3 || "";
+  const liteState = feature.properties.state_name;
+  if (liteState) return normalizeStateName(liteState, iso3);
+
   const tags = feature.properties.tags;
   if (!tags) return "Untagged Region";
   const parsed = typeof tags === "string" ? JSON.parse(tags) : tags;
   // Prefer admin1 (from reverse geocoding) over addr:state (from OSM)
   const raw = parsed["admin1"] || parsed["addr:state"];
   if (!raw) return "Untagged Region";
-  const iso3 = currentData?.metadata?.iso3 || "";
   return normalizeStateName(raw, iso3);
 }
 
