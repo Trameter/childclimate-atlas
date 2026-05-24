@@ -19,6 +19,7 @@ from .sources import facilities as facilities_src
 from .sources import grid3 as grid3_src
 from .sources import healthsites as healthsites_src
 from .sources import era5_bulk as era5_bulk_src
+from .sources import worldpop as worldpop_src
 from .sources import giga as giga_src
 from .sources import climate as climate_src
 from .sources import nasa_power as nasa_power_src
@@ -73,6 +74,10 @@ def _to_lite_geojson(scored: List[Dict], country: CountryConfig) -> Dict:
                 "longest_dry_run_days": clim.get("longest_dry_run_days", 0),
                 "heavy_precip_days": clim.get("heavy_precip_days", 0),
                 "pm25_avg_ugm3": air.get("pm25_avg_ugm3", 0),
+                # WorldPop catchment for tooltip + hover badge. Compact
+                # int field; null when raster missing or facility out of
+                # bounds (handled gracefully in the UI).
+                "catchment_under18_500m": f.get("catchment_under18_500m"),
             },
         })
     return {
@@ -112,6 +117,9 @@ def _to_geojson(scored: List[Dict], country: CountryConfig) -> Dict:
                 "recommendations": f["risk"].get("recommendations", []),
                 "climate": f.get("climate", {}),
                 "air": f.get("air", {}),
+                # WorldPop catchment — also in lite, repeated here so the
+                # detail panel reads from the full feature when available.
+                "catchment_under18_500m": f.get("catchment_under18_500m"),
             },
         })
     # Build the source attribution list based on which sources contributed
@@ -277,6 +285,17 @@ def build(iso3: str, limit: int | None = None, fresh: bool = False, full: bool =
     _log("Fetching air quality via CAMS...")
     air_by_id = air_src.fetch_for_facilities(all_facilities, sample_stride=stride)
     _log(f"  air quality for {len(air_by_id)} facilities")
+
+    # WorldPop catchment (v0.7): per-facility under-18 population in a
+    # 500m radius, computed from the local WorldPop raster. Graceful
+    # silent skip when the raster isn't on disk yet — facility just gets
+    # catchment_under18_500m = None and the UI hides the field.
+    _log("Computing WorldPop under-18 catchment (500m radius)...")
+    worldpop_src.enrich_facilities(
+        all_facilities,
+        iso3=config.iso3,
+        under_18_share=config.under_18_share,
+    )
 
     _log("Scoring...")
     scored = score_all(
