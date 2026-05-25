@@ -88,6 +88,14 @@ def _to_lite_geojson(scored: List[Dict], country: CountryConfig) -> Dict:
             "facility_count": len(features),
             "variant": "lite",
             "full_data_path": f"/data/{country.iso3}.geojson",
+            # v0.7.1: scoring_weights must live in the lite metadata too —
+            # the detail panel computes the Score Breakdown and Top Drivers
+            # by iterating Object.keys(weights), so without this every
+            # facility-detail render shows empty sections until (and
+            # sometimes after) the full file lands. ~150 bytes per country
+            # of payload to fix it. The same weights also populate the
+            # CSV export. Kept in sync with the full file's metadata.
+            "scoring_weights": country.scoring_weights,
         },
         "features": features,
     }

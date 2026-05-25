@@ -251,6 +251,13 @@ const dataCache = new Map();
 const liteCache = new Map();
 const inflight = new Map();
 
+// Cache-bust query appended to every /data/*.geojson fetch. Bump this
+// whenever the geojson SCHEMA changes (e.g. fields added/removed from
+// metadata or properties) — separate from the asset bust on CSS/JS in
+// the HTML so we don't have to re-deploy the JS bundle just because a
+// nightly data refresh ran.
+const DATA_VERSION = "1779890402";
+
 // Ballpark uncompressed sizes (used only when the server sends a compressed
 // Content-Length, which reports the COMPRESSED byte count and would make
 // %-progress overshoot). These are approximate; off-by-10% is fine because
@@ -297,8 +304,14 @@ async function loadAtlas(iso3, { showProgress = false, lite = false } = {}) {
   const p = (async () => {
     try {
       // Absolute path so the same module works from /3d/ (where ./ would
-      // resolve to /3d/data/X.geojson and 404).
-      const url = lite ? `/data/${iso3}.lite.geojson` : `/data/${iso3}.geojson`;
+      // resolve to /3d/data/X.geojson and 404). The ?v= query forces a
+      // cache-bust when the geojson schema changes (v0.7.1 added
+      // scoring_weights to lite metadata — without busting, returning
+      // visitors would still get the old lite from CloudFlare/disk cache
+      // and the detail panel would render with empty Score Breakdown).
+      const url = lite
+        ? `/data/${iso3}.lite.geojson?v=${DATA_VERSION}`
+        : `/data/${iso3}.geojson?v=${DATA_VERSION}`;
       const r = await fetch(url);
       if (!r.ok) throw new Error(r.status);
 
@@ -2223,6 +2236,14 @@ function renderDetail(feature) {
   const iso = (lite.properties && lite.properties._iso3) || _currentCountryIso;
   let p = lite.properties;
   const full = liteId ? getFullFeature(iso, liteId) : null;
+  // hasFull gates the Score breakdown, Top drivers, and Recommended actions
+  // sections — they all need risk_components / top_drivers / recommendations
+  // which only live on the full feature. Without this gate the lite-only
+  // render would briefly paint 6 zero-pts breakdown rows + an empty drivers
+  // list + a "No recommendations" placeholder, all of which get replaced a
+  // beat later when the full fetch lands. Cleaner to hide-then-show than
+  // to flash wrong-looking content.
+  const hasFull = !!full;
   if (full) {
     feature = full;
     p = full.properties;
@@ -2378,26 +2399,29 @@ function renderDetail(feature) {
       <div class="microscene-label" id="microscene-label"></div>
     </div>
 
+    ${hasFull ? `
     <div class="detail-section">
       <h4>Score breakdown</h4>
       ${breakdown}
-    </div>
+    </div>` : ""}
 
+    ${hasFull ? `
     <div class="detail-section">
-      <h4>Top drivers · plain English</h4>
+      <h4>Top drivers</h4>
       ${driversHtml}
-    </div>
+    </div>` : ""}
 
     <div class="detail-section">
       <h4>Raw inputs</h4>
       ${inputsHtml}
     </div>
 
+    ${hasFull ? `
     <div class="detail-section">
       <h4>Recommended actions · ranked</h4>
       <p class="section-note">Only drivers with a facility-level fix produce a recommendation.</p>
       ${recHtml}
-    </div>
+    </div>` : ""}
   `;
 
   // Open right panel
