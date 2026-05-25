@@ -160,6 +160,27 @@ button { font-family: inherit; }
 }
 .btn:hover { background: var(--ink-2); border-color: var(--paper-soft); color: var(--paper); }
 
+/* Ember-filled CTA — used for the "Stand inside" link that takes a viewer
+   from the data tool over to the immersive Stand experience. Visually
+   distinct from the regular .btn (which is a secondary action) so first-
+   time visitors see it as the primary discovery path off the atlas. */
+.btn-primary {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px;
+  border-radius: 3px;
+  font-size: 13px; font-weight: 500;
+  border: 1px solid var(--ember);
+  color: var(--ink);
+  background: var(--ember);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+.btn-primary:hover { background: #e08a5f; border-color: #e08a5f; }
+.btn-primary:active { transform: translateY(1px); }
+.btn-primary .arrow { transition: transform 0.15s; }
+.btn-primary:hover .arrow { transform: translateX(2px); }
+
 /* =========================================================================
    SHELL — 3-column grid; right column collapses to 0 when no facility open
    ========================================================================= */
