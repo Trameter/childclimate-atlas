@@ -27,6 +27,11 @@ from .sources import air_quality as air_src
 from .sources import geocode as geocode_src
 from .scoring.score import score_all
 
+# Bump on schema / methodology changes; stamped into emitted GeoJSON
+# metadata (both full and lite tiers) for provenance. Single source so the
+# literal can't drift from the in-file v0.x.y history comments.
+PIPELINE_VERSION = "0.7.1"
+
 
 def _log(msg: str) -> None:
     print(f"[build] {msg}", flush=True)
@@ -96,6 +101,10 @@ def _to_lite_geojson(scored: List[Dict], country: CountryConfig) -> Dict:
             # of payload to fix it. The same weights also populate the
             # CSV export. Kept in sync with the full file's metadata.
             "scoring_weights": country.scoring_weights,
+            # Provenance — the print report reads metadata off the LITE file,
+            # so stamp the version here too rather than letting it fall
+            # through to the frontend's hardcoded default.
+            "pipeline_version": PIPELINE_VERSION,
         },
         "features": features,
     }
@@ -151,7 +160,7 @@ def _to_geojson(scored: List[Dict], country: CountryConfig) -> Dict:
             "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "facility_count": len(features),
             "scoring_weights": country.scoring_weights,
-            "pipeline_version": "0.2.0",
+            "pipeline_version": PIPELINE_VERSION,
             "facility_sources": sources_used,
         },
         "features": features,

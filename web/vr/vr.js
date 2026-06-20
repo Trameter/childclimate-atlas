@@ -200,6 +200,11 @@
   const pulsingBeacons = [];     // [{mesh, baseOpacity, baseScale, iso}]
   const pulsingRings = [];       // [{mesh, basePos, phase, iso}]
   let currentIso = "BGD";
+  // Shared cancellation token for the two globe-rotation animations so a
+  // newer one supersedes any in-flight one (otherwise rapid country clicks,
+  // or the tour fighting a manual switch, stack competing rAF loops that
+  // jitter globeGroup frame-by-frame).
+  let globeAnimId = 0;
 
   // ---------------------------------------------------------------------
   // Lat/lng → globe-surface vector
@@ -223,11 +228,16 @@
   // Country loading
   // ---------------------------------------------------------------------
   const VR_BEACON_CAP = 1500;
+  // Two-tier data: the VR globe only needs render-essentials (score, coords,
+  // name, type), so it loads the LITE tier like /3d does — NOT the full
+  // per-country GeoJSON (~580 MB across 5 countries) which would OOM the
+  // headset / mobile browsers this page targets. Cachebust matches app.js.
+  const DATA_VERSION = "1779890402";
 
   async function loadOneCountry(iso) {
     if (countryData[iso]) return;
     try {
-      const r = await fetch(`/data/${iso}.geojson`);
+      const r = await fetch(`/data/${iso}.lite.geojson?v=${DATA_VERSION}`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const json = await r.json();
       const features = json.features || [];
@@ -236,6 +246,9 @@
       beaconsGroups[iso] = group;
       globeGroup.add(group);
       applyCountryOpacities();
+      // If audio is already on, rebuild the spatial top-12 now that another
+      // country's severe beacons exist (teardown removes the old set first).
+      if (audioEnabled) { teardownSpatialAudio(); setupSpatialAudio(); }
     } catch (e) {
       console.warn(`[vr] couldn't load ${iso}:`, e);
     }
@@ -358,6 +371,7 @@
   }
 
   function setActiveCountry(iso) {
+    if (tourActive) stopTour(); // user took over — end the auto-tour
     if (iso === currentIso) return;
     currentIso = iso;
     document.querySelectorAll(".vr-country").forEach(b => {
@@ -400,8 +414,10 @@
     const startQuaternion = globeGroup.quaternion.clone();
     const start = performance.now();
     const DURATION = 1100;
+    const myId = ++globeAnimId;
 
     function frame(now) {
+      if (myId !== globeAnimId) return; // a newer globe animation took over
       const t = Math.min((now - start) / DURATION, 1);
       const eased = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3)/2;
       const slerped = new THREE.Quaternion().slerpQuaternions(startQuaternion, finalQuaternion, eased);
@@ -533,8 +549,16 @@
   const originMat = new THREE.MeshBasicMaterial({ color: 0xD87B4F });
   const tipGeom = new THREE.SphereGeometry(0.014, 16, 12);
   const tipMat = new THREE.MeshBasicMaterial({ color: 0xFAF8F4 });
-  function attachController(idx) {
+  // Controller visuals + select listener are built ONCE per index. The
+  // renderer's getController(idx) returns the SAME persistent object across
+  // sessions, so re-attaching on every XR entry previously stacked duplicate
+  // meshes and duplicate 'select' listeners (2x/3x xrPick per trigger) and
+  // leaked the cloned geometries/materials. Now we only toggle visibility +
+  // scene membership on enter/exit.
+  function setupControllerOnce(idx) {
     const c = renderer.xr.getController(idx);
+    if (c.userData._ccaInit) return c;
+    c.userData._ccaInit = true;
     c.add(new THREE.Mesh(originGeom.clone(), originMat.clone()));
     c.add(new THREE.Mesh(pointerGeom.clone(), pointerMat.clone()));
     const tip = new THREE.Mesh(tipGeom.clone(), tipMat.clone());
@@ -543,7 +567,6 @@
     // select fires for BOTH controller trigger AND hand pinch — WebXR
     // routes hand input through the same input-source slot.
     c.addEventListener("select", () => xrPick(c));
-    scene.add(c);
     return c;
   }
   let controllers = [];
@@ -554,9 +577,13 @@
   // are set down) and removes on disconnect.
   const FINGERTIP_JOINTS = ["thumb-tip", "index-finger-tip", "middle-finger-tip", "ring-finger-tip", "pinky-finger-tip"];
   const fingertipSpheres = [];
-  function attachHandFingertips(idx) {
+  function setupHandFingertipsOnce(idx) {
     const hand = renderer.xr.getHand(idx);
+    if (hand.userData._ccaInit) return hand;
+    hand.userData._ccaInit = true;
     hand.addEventListener("connected", () => {
+      // Guard against duplicate sphere sets if 'connected' re-fires.
+      if (fingertipSpheres.some(s => s.hand === hand)) return;
       for (const jointName of FINGERTIP_JOINTS) {
         const sphere = new THREE.Mesh(
           new THREE.SphereGeometry(0.008, 12, 8),
@@ -571,11 +598,12 @@
       for (let i = fingertipSpheres.length - 1; i >= 0; i--) {
         if (fingertipSpheres[i].hand === hand) {
           hand.remove(fingertipSpheres[i].sphere);
+          fingertipSpheres[i].sphere.geometry?.dispose();
+          fingertipSpheres[i].sphere.material?.dispose();
           fingertipSpheres.splice(i, 1);
         }
       }
     });
-    scene.add(hand);
     return hand;
   }
   function updateHandFingertips() {
@@ -657,7 +685,11 @@
   let xrSession = null;
   let xrSessionType = null;
   async function enterXr(sessionType) {
-    if (xrSession) return;
+    // A relabeled "Exit VR/AR" click ends the live session (the 'end'
+    // handler below does the full cleanup). Without this the exit button
+    // was a no-op and immersive mode could only be left via the headset.
+    if (xrSession) { xrSession.end(); return; }
+    if (tourActive) stopTour(); // headset takes over the globe
     try {
       const opts = sessionType === "immersive-ar"
         ? { requiredFeatures: ["local-floor"], optionalFeatures: ["hit-test", "dom-overlay", "hand-tracking"], domOverlay: { root: document.body } }
@@ -671,8 +703,9 @@
       tooltip.hidden = true;
       $("vr-detail").hidden = true;
       await renderer.xr.setSession(xrSession);
-      controllers = [attachController(0), attachController(1)];
-      attachHandFingertips(0); attachHandFingertips(1);
+      controllers = [setupControllerOnce(0), setupControllerOnce(1)];
+      controllers.forEach(c => { c.visible = true; scene.add(c); });
+      [setupHandFingertipsOnce(0), setupHandFingertipsOnce(1)].forEach(h => { h.visible = true; scene.add(h); });
       if (sessionType === "immersive-ar") {
         scene.background = null;
         await setupArHitTest();
@@ -680,7 +713,7 @@
       xrSession.addEventListener("end", () => {
         document.body.classList.remove("in-xr", "in-xr-ar");
         xrSession = null; xrSessionType = null;
-        controllers.forEach(c => scene.remove(c));
+        controllers.forEach(c => { c.visible = false; scene.remove(c); });
         controllers = [];
         teardownArHitTest();
         $("vr-enter-btn").querySelector(".vr-enter-label").textContent = "Enter VR";
@@ -741,7 +774,11 @@
       const score = beacon.userData.feature.properties.risk_score || 75;
       const freq = 110 + Math.max(0, score - 75) * 2.8;
       const sound = new THREE.PositionalAudio(listener);
-      const osc = audioContext.createOscillator();
+      // Oscillator MUST come from the listener's context (the one the
+      // PositionalAudio panner graph lives in) — nodes can't connect across
+      // two AudioContexts, so using the drone's audioContext here meant the
+      // spatial tones silently never sounded.
+      const osc = listener.context.createOscillator();
       osc.type = "sine";
       osc.frequency.value = freq;
       sound.setNodeSource(osc);
@@ -792,11 +829,21 @@
       oscA.start(); oscB.start(); oscC.start();
     }
     audioEnabled = !audioEnabled;
-    const target = audioEnabled ? 0.04 : 0;
-    audioGain.gain.cancelScheduledValues(audioContext.currentTime);
-    audioGain.gain.linearRampToValueAtTime(target, audioContext.currentTime + 0.6);
-    if (audioEnabled) setupSpatialAudio();
-    else teardownSpatialAudio();
+    const applyAudioState = () => {
+      const target = audioEnabled ? 0.04 : 0;
+      audioGain.gain.cancelScheduledValues(audioContext.currentTime);
+      audioGain.gain.linearRampToValueAtTime(target, audioContext.currentTime + 0.6);
+      if (audioEnabled) setupSpatialAudio();
+      else teardownSpatialAudio();
+    };
+    // iOS Safari / WebKit (and any context that hit "interrupted") can start
+    // suspended; resume() is a no-op when already running. Called inside the
+    // click handler so the user gesture is still active.
+    if (audioContext.state === "suspended" || audioContext.state === "interrupted") {
+      audioContext.resume().then(applyAudioState).catch(applyAudioState);
+    } else {
+      applyAudioState();
+    }
     $("vr-audio-btn")?.classList.toggle("active", audioEnabled);
     $("vr-audio-btn").querySelector(".vr-audio-label").textContent = audioEnabled ? "Sound on" : "Sound off";
   }
@@ -1096,8 +1143,10 @@
     const finalQuaternion = new THREE.Quaternion().multiplyQuaternions(axialTilt, center);
     const startQuaternion = globeGroup.quaternion.clone();
     const start = performance.now();
+    const myId = ++globeAnimId;
     return new Promise(resolve => {
       function frame(now) {
+        if (myId !== globeAnimId) { resolve(); return; } // superseded by a newer animation
         const t = Math.min((now - start) / durationMs, 1);
         const eased = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3)/2;
         const slerped = new THREE.Quaternion().slerpQuaternions(startQuaternion, finalQuaternion, eased);
@@ -1121,19 +1170,36 @@
     const climate = typeof p.climate === "string" ? JSON.parse(p.climate) : (p.climate || {});
     const air = typeof p.air === "string" ? JSON.parse(p.air) : (p.air || {});
     const drivers = typeof p.top_drivers === "string" ? JSON.parse(p.top_drivers) : (p.top_drivers || []);
-    const top = drivers[0];
-    if (top === "heat_exposure" && climate.heat_index_days != null) {
-      return `${climate.heat_index_days} days above 35°C apparent temperature.`;
+    // Flat lite fields (present on the lite tier the VR globe now loads, even
+    // when the nested climate/air objects and top_drivers are not).
+    const heatDays = climate.heat_index_days ?? p.heat_index_days;
+    const pm25 = air.pm25_avg_ugm3 ?? p.pm25_avg_ugm3;
+    const precipDays = climate.heavy_precip_days ?? p.heavy_precip_days;
+    const dryDays = climate.longest_dry_run_days ?? p.longest_dry_run_days;
+    // Use the explicit top driver when present (full data); otherwise derive
+    // the dominant hazard from the flat numerics lite carries.
+    let top = drivers[0];
+    if (!top) {
+      const cand = [
+        ["heat_exposure", heatDays || 0],
+        ["air_pollution", pm25 || 0],
+        ["flood_risk", precipDays || 0],
+        ["drought_risk", dryDays || 0],
+      ].sort((a, b) => b[1] - a[1]);
+      top = cand[0][1] > 0 ? cand[0][0] : "";
     }
-    if (top === "air_pollution" && air.pm25_avg_ugm3 != null) {
-      const mult = (air.pm25_avg_ugm3 / 5).toFixed(1);
-      return `PM2.5 averaged ${air.pm25_avg_ugm3} µg/m³ — ${mult}× the WHO 2021 guideline.`;
+    if (top === "heat_exposure" && heatDays != null) {
+      return `${heatDays} days above 35°C apparent temperature.`;
     }
-    if (top === "flood_risk" && climate.heavy_precip_days != null) {
-      return `${climate.heavy_precip_days} heavy-precipitation days (≥50 mm) per year.`;
+    if (top === "air_pollution" && pm25 != null) {
+      const mult = (pm25 / 5).toFixed(1);
+      return `PM2.5 averaged ${pm25} µg/m³ — ${mult}× the WHO 2021 guideline.`;
     }
-    if (top === "drought_risk" && climate.longest_dry_run_days != null) {
-      return `${climate.longest_dry_run_days}-day longest consecutive dry run.`;
+    if (top === "flood_risk" && precipDays != null) {
+      return `${precipDays} heavy-precipitation days (≥50 mm) per year.`;
+    }
+    if (top === "drought_risk" && dryDays != null) {
+      return `${dryDays}-day longest consecutive dry run.`;
     }
     if (top === "child_density") {
       return "Child-population catchment density at or near the country maximum.";

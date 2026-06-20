@@ -62,7 +62,13 @@
         bestKey = key;
       }
     }
-    if (!bestKey) return null;
+    // Bail when nothing has a positive weighted contribution. On the
+    // lite-first render path risk_components is dropped, so every weighted
+    // value is 0 and the loop would otherwise latch onto the first key
+    // (heat) and paint a false zero-intensity heat vignette (plus churn a
+    // throwaway WebGL context) until the full data lands. Returning null
+    // here makes create() return null so the caller hides the block.
+    if (!bestKey || bestWeighted <= 0) return null;
     // Points + max so the caption can show "25 / 25" the same way the
     // Score breakdown rows do — makes the vignette legibly tied to the
     // exact row that drove it.

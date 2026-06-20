@@ -75,10 +75,13 @@ def _fetch_point(lat: float, lon: float) -> Dict:
         except requests.RequestException as e:
             last_err = f"{type(e).__name__}: {e}"
             time.sleep(1 + attempt)
-    # Non-429 failure. Historical behavior returned an empty dict so the
-    # caller's _summarize could fall through cleanly. Preserve that.
-    print(f"  [air] fetch failed at {lat},{lon}: {last_err}")
-    return {}
+    # Non-429 failure after retries. Raise (matching climate.py) so the
+    # caller's `except Exception` counts a skip and leaves the facility for
+    # the own-cache / nearest-neighbor fill from genuinely cached points,
+    # rather than fabricating a zero-pollution ("pristine air") summary that
+    # would both mis-score this facility AND poison the nearest-neighbor
+    # pool for surrounding facilities.
+    raise RuntimeError(f"Open-Meteo AQ failed at {lat},{lon}: {last_err}")
 
 
 def _summarize(hourly: Dict) -> Dict[str, float]:

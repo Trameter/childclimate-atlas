@@ -25,7 +25,7 @@ _rule(
     lambda c, a, f: c.get("heat_index_days", 0) >= 120 and f["type"] in ("clinic", "hospital"),
     1, "Heat Resilience",
     "Install solar-powered cooling",
-    "This facility experiences extreme heat ({heat_days} days/year above 35°C). Solar-powered fans or evaporative coolers protect patients and maintain vaccine cold-chain integrity.",
+    "This facility experiences extreme heat ({heat_days} days/year of high heat-index conditions). Solar-powered fans or evaporative coolers protect patients and maintain vaccine cold-chain integrity.",
     "2,000–5,000",
 )
 _rule(
@@ -39,7 +39,7 @@ _rule(
     lambda c, a, f: 60 <= c.get("heat_index_days", 0) < 120,
     3, "Heat Resilience",
     "Add reflective roof coating + shade structures",
-    "Moderate heat stress ({heat_days} days/year above 35°C). Low-cost reflective coatings can reduce indoor temperatures by 5-8°C. Shade trees in schoolyards add protection.",
+    "Moderate heat stress ({heat_days} days/year of elevated heat-index conditions). Low-cost reflective coatings can reduce indoor temperatures by 5-8°C. Shade trees in schoolyards add protection.",
     "500–1,500",
 )
 

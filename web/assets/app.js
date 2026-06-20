@@ -347,7 +347,17 @@ async function loadAtlas(iso3, { showProgress = false, lite = false } = {}) {
       cache.set(iso3, data);
       return data;
     } catch {
-      return FALLBACK;
+      // Per-caller clone so each failed country mutates its OWN copy.
+      // Returning the shared FALLBACK by reference let two failed countries
+      // alias the same object; tagFeaturesIso then cross-contaminated _iso3
+      // and the merge pushed the same sample features twice under the last
+      // failing iso. Stamp iso3 so labels stay coherent. Not cached, so a
+      // later switch retries.
+      const fb = (typeof structuredClone === "function")
+        ? structuredClone(FALLBACK)
+        : JSON.parse(JSON.stringify(FALLBACK));
+      if (fb.metadata) fb.metadata.iso3 = iso3;
+      return fb;
     } finally {
       inflight.delete(key);
     }
@@ -553,6 +563,11 @@ let _currentCountryIso = "NGA";    // tracked separately from activeFilters
                              // since the data load is async; updated at the
                              // very top of switchCountry so the aura repaint
                              // can use the new tint immediately.
+let _selectedFacilityKey = null; // `${iso}::${id}` of the open detail panel;
+                             // guards the deferred full-data re-render from
+                             // clobbering a newer selection.
+let _sunInterval = null;     // 3D sun-marker refresh timer handle (idempotent).
+let _searchTimer = null;     // debounce handle for the live search filter.
 
 // ---- Great-circle path helpers (country-trail arc on switchCountry) ----
 //
@@ -646,10 +661,14 @@ function addSunMarker() {
   });
   updateSunMarker();
   // Refresh once a minute — the sun moves ~0.25° of longitude per minute.
-  setInterval(updateSunMarker, 60000);
+  // Stored + idempotent so re-entering 3D doesn't stack duplicate timers.
+  if (_sunInterval === null) _sunInterval = setInterval(updateSunMarker, 60000);
 }
 
 function updateSunMarker() {
+  // No-op in 2D — the sun marker is a 3D-only globe feature. Without this
+  // the minute timer keeps doing pointless setData after a 3D→2D toggle.
+  if (!IS_3D) return;
   const src = map.getSource("sun-marker");
   if (!src) return;
   const [lng, lat] = computeSubsolarPoint();
@@ -1421,6 +1440,8 @@ function populateStates(features) {
   const allOpt = document.createElement("div");
   allOpt.className = "state-opt sel";
   allOpt.dataset.value = "";
+  allOpt.setAttribute("role", "option");
+  allOpt.setAttribute("aria-selected", "true");
   allOpt.innerHTML = 'All states / regions';
   panel.appendChild(allOpt);
 
@@ -1428,6 +1449,8 @@ function populateStates(features) {
     const opt = document.createElement("div");
     opt.className = "state-opt";
     opt.dataset.value = s;
+    opt.setAttribute("role", "option");
+    opt.setAttribute("aria-selected", "false");
     opt.innerHTML = `<span>${escapeHtml(s)}</span><span class="cnt">${c}</span>`;
     panel.appendChild(opt);
   });
@@ -1438,9 +1461,15 @@ function populateStates(features) {
       e.stopPropagation();
       const val = opt.dataset.value;
       activeFilters.state = val;
-      document.getElementById("state-btn").textContent = val || "All states / regions";
-      panel.querySelectorAll(".state-opt").forEach(o => o.classList.remove("sel"));
+      const sBtn = document.getElementById("state-btn");
+      sBtn.textContent = val || "All states / regions";
+      sBtn.setAttribute("aria-expanded", "false");
+      panel.querySelectorAll(".state-opt").forEach(o => {
+        o.classList.remove("sel");
+        o.setAttribute("aria-selected", "false");
+      });
       opt.classList.add("sel");
+      opt.setAttribute("aria-selected", "true");
       panel.classList.remove("open");
       // URL mirrors state filter so a Bangladesh-state-of-Dhaka share link
       // lands the recipient on the same filtered view. Empty val clears.
@@ -1504,6 +1533,7 @@ function renderSearchResults(query) {
     panel.innerHTML = '<div class="search-empty">No matching facilities.</div>';
     panel.classList.add("open");
     input?.setAttribute("aria-expanded", "true");
+    input?.removeAttribute("aria-activedescendant");
     return;
   }
 
@@ -1524,7 +1554,7 @@ function renderSearchResults(query) {
     if (typeCap && !typeInName) subParts.push(typeCap);
     if (state) subParts.push(state);
     const subText = subParts.join(" · ");
-    return `<div class="search-result${i === 0 ? " hl" : ""}" role="option" data-id="${escapeHtml(p.id)}" data-idx="${i}">
+    return `<div class="search-result${i === 0 ? " hl" : ""}" id="sr-opt-${i}" role="option" aria-selected="${i === 0 ? "true" : "false"}" data-id="${escapeHtml(p.id)}" data-idx="${i}">
       <span class="d" style="background:${bandColor(s)}"></span>
       <div class="meta">
         <span class="t">${escapeHtml(name)}</span>
@@ -1535,13 +1565,22 @@ function renderSearchResults(query) {
   }).join("");
   panel.classList.add("open");
   input?.setAttribute("aria-expanded", "true");
+  // Point the combobox input at the active option so screen readers announce
+  // arrow-key navigation (WAI-ARIA combobox pattern).
+  input?.setAttribute("aria-activedescendant", results.length ? "sr-opt-0" : "");
 
   panel.querySelectorAll(".search-result").forEach(el => {
     el.addEventListener("click", () => selectSearchResult(parseInt(el.dataset.idx, 10)));
     el.addEventListener("mouseenter", () => {
-      panel.querySelectorAll(".search-result").forEach(r => r.classList.remove("hl"));
+      const idx = parseInt(el.dataset.idx, 10);
+      panel.querySelectorAll(".search-result").forEach(r => {
+        r.classList.remove("hl");
+        r.setAttribute("aria-selected", "false");
+      });
       el.classList.add("hl");
-      searchHighlightIdx = parseInt(el.dataset.idx, 10);
+      el.setAttribute("aria-selected", "true");
+      searchHighlightIdx = idx;
+      input?.setAttribute("aria-activedescendant", "sr-opt-" + idx);
     });
   });
 }
@@ -1551,6 +1590,7 @@ function closeSearchResults() {
   const input = document.getElementById("search");
   if (panel) { panel.classList.remove("open"); panel.innerHTML = ""; }
   input?.setAttribute("aria-expanded", "false");
+  input?.removeAttribute("aria-activedescendant");
   searchResultFeatures = [];
   searchHighlightIdx = -1;
 }
@@ -1572,9 +1612,12 @@ function moveSearchHighlight(delta) {
   const panel = document.getElementById("search-results");
   panel?.querySelectorAll(".search-result").forEach(el => {
     const i = parseInt(el.dataset.idx, 10);
-    el.classList.toggle("hl", i === searchHighlightIdx);
-    if (i === searchHighlightIdx) el.scrollIntoView({ block: "nearest" });
+    const on = i === searchHighlightIdx;
+    el.classList.toggle("hl", on);
+    el.setAttribute("aria-selected", on ? "true" : "false");
+    if (on) el.scrollIntoView({ block: "nearest" });
   });
+  document.getElementById("search")?.setAttribute("aria-activedescendant", "sr-opt-" + searchHighlightIdx);
 }
 
 // ---- filtering ----
@@ -2235,6 +2278,9 @@ function renderDetail(feature) {
   const liteId = lite.properties && lite.properties.id;
   const iso = (lite.properties && lite.properties._iso3) || _currentCountryIso;
   let p = lite.properties;
+  // Record which facility's panel is open, so the deferred full-data
+  // re-render below bails if the user clicks another facility first.
+  _selectedFacilityKey = liteId ? `${iso}::${liteId}` : null;
   const full = liteId ? getFullFeature(iso, liteId) : null;
   // hasFull gates the Score breakdown, Top drivers, and Recommended actions
   // sections — they all need risk_components / top_drivers / recommendations
@@ -2248,15 +2294,26 @@ function renderDetail(feature) {
     feature = full;
     p = full.properties;
   } else if (iso) {
-    // Trigger full fetch + re-render this exact facility when it lands.
+    // Trigger full fetch + re-render this exact facility when it lands — but
+    // only if it's still the open one. Rapid clicks otherwise let a
+    // late-resolving fetch for facility A clobber the panel now showing B.
+    const wantKey = `${iso}::${liteId}`;
     ensureFullDataLoading(iso).then(() => {
+      if (_selectedFacilityKey !== wantKey) return;
       const upgraded = getFullFeature(iso, liteId);
       if (upgraded) renderDetail(upgraded);
     }).catch(() => {});
   }
   const s = p.risk_score;
   const b = band(s);
-  const weights = currentData.metadata.scoring_weights || {};
+  // Use the CLICKED facility's own country weights — in 3D all countries'
+  // dots are clickable, and per-country weights differ materially. Falls
+  // back to the active country, then empty. Fixes the Score Breakdown
+  // maxima, Top Drivers order, and the micro-scene's dominant-stress pick
+  // for cross-country clicks (MicroScene.create reuses this same `weights`).
+  const weights = (countryDataByIso[iso] && countryDataByIso[iso].metadata && countryDataByIso[iso].metadata.scoring_weights)
+    || (currentData && currentData.metadata && currentData.metadata.scoring_weights)
+    || {};
   // Tear down any prior micro-scene (different facility just got clicked).
   if (_activeMicroScene) {
     _activeMicroScene.dispose();
@@ -2463,6 +2520,7 @@ function renderDetail(feature) {
 function closeDetail() {
   document.body.classList.remove("has-detail");
   document.querySelector(".detail-wrap")?.setAttribute("aria-hidden", "true");
+  _selectedFacilityKey = null;
   // Dispose the micro-scene's WebGL resources — critical to avoid
   // exhausting the 16-context browser limit after many facility opens.
   if (_activeMicroScene) {
@@ -2722,20 +2780,40 @@ function updateTableContents(overlay) {
   // 3. Table body — the only big DOM mutation per update
   const tbody = overlay.querySelector("tbody");
   if (!tbody) return;
+  let anyMissingFull = false;
   tbody.innerHTML = rendered.map((f, i) => {
-    const p = f.properties;
-    const s = p.risk_score;
-    const drivers = typeof p.top_drivers === "string" ? JSON.parse(p.top_drivers) : (p.top_drivers || []);
-    const recs = typeof p.recommendations === "string" ? JSON.parse(p.recommendations) : (p.recommendations || []);
-    return `<tr data-id="${escapeHtml(p.id)}">
+    const liteP = f.properties;
+    const featIso = liteP._iso3 || _currentCountryIso;
+    // Top Driver + Action live only on the FULL feature (lite drops them).
+    const full = getFullFeature(featIso, liteP.id);
+    // Only flag the ACTIVE country's missing rows for re-fetch. In 3D the
+    // table also shows context-country rows whose full data is never loaded
+    // here (only on click) — flagging those would make the recovery branch
+    // below loop forever, since ensureFullDataLoading only fetches the
+    // active country. Context rows keep the … placeholder until clicked.
+    if (!full && featIso === _currentCountryIso) anyMissingFull = true;
+    const p = full ? full.properties : liteP;
+    const s = liteP.risk_score;
+    const drivers = full ? (typeof p.top_drivers === "string" ? JSON.parse(p.top_drivers) : (p.top_drivers || [])) : null;
+    const recs = full ? (typeof p.recommendations === "string" ? JSON.parse(p.recommendations) : (p.recommendations || [])) : null;
+    const driverCell = full ? escapeHtml((drivers[0] || "").replace(/_/g, " ")) : '<span style="color:var(--paper-mute)">…</span>';
+    const actionCell = full ? (recs.length ? escapeHtml(recs[0].title) : "—") : '<span style="color:var(--paper-mute)">…</span>';
+    return `<tr data-id="${escapeHtml(liteP.id)}">
       <td>${i + 1}</td>
-      <td class="name-cell" title="${escapeHtml(displayName(f))}">${typeIcon(p.facility_type)} ${escapeHtml(displayName(f))}</td>
-      <td>${escapeHtml(p.facility_type)}</td>
+      <td class="name-cell" title="${escapeHtml(displayName(f))}">${typeIcon(liteP.facility_type)} ${escapeHtml(displayName(f))}</td>
+      <td>${escapeHtml(liteP.facility_type)}</td>
       <td><span class="table-badge ${band(s)}">${s.toFixed(0)}</span></td>
-      <td>${escapeHtml((drivers[0] || "").replace(/_/g, " "))}</td>
-      <td>${recs.length ? escapeHtml(recs[0].title) : "—"}</td>
+      <td>${driverCell}</td>
+      <td>${actionCell}</td>
     </tr>`;
   }).join("");
+  // If any row lacked full data, fetch it for the active country and
+  // re-render once it lands (self-terminates: next pass has full data).
+  if (anyMissingFull && _currentCountryIso) {
+    ensureFullDataLoading(_currentCountryIso).then(() => {
+      if (document.body.contains(overlay)) updateTableContents(overlay);
+    }).catch(() => {});
+  }
 
   // 4. Re-wire row click listeners (rows are freshly minted each update)
   tbody.querySelectorAll("tr[data-id]").forEach(tr => {
@@ -2803,29 +2881,58 @@ function wireOverlayShellEvents(overlay) {
 }
 
 // ---- export ----
-function exportCSV() {
-  if (!filteredFeatures.length) return;
+function csvCell(v) {
+  // RFC-4180 quoting + spreadsheet formula-injection guard. Facility names
+  // come from OpenStreetMap (publicly editable), so a name like `="evil"` or
+  // `5" Clinic` must not break the row or execute as a formula in Excel/Sheets.
+  let s = v === null || v === undefined ? "" : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return '"' + s.replace(/"/g, '""') + '"';
+}
+
+// Active-country subset of the current view. In 3D, filteredFeatures keeps
+// other countries as dimmed context; exports must not silently include them
+// under the active country's filename + metadata.
+function activeCountryFeatures() {
+  return IS_3D
+    ? filteredFeatures.filter(f => !f.properties._iso3 || f.properties._iso3 === _currentCountryIso)
+    : filteredFeatures;
+}
+
+async function exportCSV() {
+  const exportFeats = activeCountryFeatures();
+  if (!exportFeats.length) return;
+  // filteredFeatures are LITE — upgrade each to its FULL feature so the
+  // component scores, no2, and recommendation columns are real rather than
+  // all-zero. Ensure full data is loaded first.
+  const isos = [...new Set(exportFeats.map(f => f.properties._iso3 || currentData.metadata.iso3))];
+  await Promise.all(isos.map(iso => ensureFullDataLoading(iso).catch(() => {})));
   const weights = currentData.metadata.scoring_weights || {};
   const compKeys = Object.keys(weights);
   const header = ["name", "type", "lat", "lon", "risk_score", "risk_band", ...compKeys,
     "heat_days", "flood_days", "dry_streak", "pm25", "no2", "top_rec"];
-  const rows = filteredFeatures.map(f => {
-    const p = f.properties;
+  const rows = exportFeats.map(f => {
+    const iso = f.properties._iso3 || currentData.metadata.iso3;
+    const full = getFullFeature(iso, f.properties.id) || f;
+    const p = full.properties;
     const comps = typeof p.risk_components === "string" ? JSON.parse(p.risk_components) : (p.risk_components || {});
     const clim = typeof p.climate === "string" ? JSON.parse(p.climate) : (p.climate || {});
     const air = typeof p.air === "string" ? JSON.parse(p.air) : (p.air || {});
     const recs = typeof p.recommendations === "string" ? JSON.parse(p.recommendations) : (p.recommendations || []);
     return [
-      `"${displayName(f)}"`, p.facility_type,
-      f.geometry.coordinates[1], f.geometry.coordinates[0],
-      p.risk_score, bandLabel(p.risk_score),
-      ...compKeys.map(k => (comps[k] || 0).toFixed(3)),
-      clim.heat_index_days || 0, clim.heavy_precip_days || 0, clim.longest_dry_run_days || 0,
-      air.pm25_avg_ugm3 || 0, air.no2_avg_ugm3 || 0,
-      `"${recs.length ? recs[0].title : 'None'}"`,
+      csvCell(displayName(full)), csvCell(p.facility_type),
+      csvCell(full.geometry.coordinates[1]), csvCell(full.geometry.coordinates[0]),
+      csvCell(p.risk_score), csvCell(bandLabel(p.risk_score)),
+      ...compKeys.map(k => csvCell((comps[k] || 0).toFixed(3))),
+      csvCell(p.heat_index_days ?? clim.heat_index_days ?? 0),
+      csvCell(p.heavy_precip_days ?? clim.heavy_precip_days ?? 0),
+      csvCell(p.longest_dry_run_days ?? clim.longest_dry_run_days ?? 0),
+      csvCell(p.pm25_avg_ugm3 ?? air.pm25_avg_ugm3 ?? 0),
+      csvCell(air.no2_avg_ugm3 ?? 0),
+      csvCell(recs.length ? recs[0].title : "None"),
     ].join(",");
   });
-  const csv = [header.join(","), ...rows].join("\n");
+  const csv = [header.map(csvCell).join(","), ...rows].join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -2834,8 +2941,16 @@ function exportCSV() {
   URL.revokeObjectURL(url);
 }
 
-function exportGeoJSON() {
-  const out = { type: "FeatureCollection", metadata: currentData.metadata, features: filteredFeatures };
+async function exportGeoJSON() {
+  const exportFeats = activeCountryFeatures();
+  if (!exportFeats.length) return;
+  // Upgrade to full features so the exported GeoJSON carries risk_components,
+  // recommendations, climate + air (the lite render tier drops them).
+  const isos = [...new Set(exportFeats.map(f => f.properties._iso3 || currentData.metadata.iso3))];
+  await Promise.all(isos.map(iso => ensureFullDataLoading(iso).catch(() => {})));
+  const feats = exportFeats.map(f =>
+    getFullFeature(f.properties._iso3 || currentData.metadata.iso3, f.properties.id) || f);
+  const out = { type: "FeatureCollection", metadata: currentData.metadata, features: feats };
   const blob = new Blob([JSON.stringify(out, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -3082,15 +3197,22 @@ document.addEventListener("DOMContentLoaded", () => {
   // State dropdown toggle
   document.getElementById("state-btn").addEventListener("click", (e) => {
     e.stopPropagation();
-    document.getElementById("state-panel").classList.toggle("open");
+    const open = document.getElementById("state-panel").classList.toggle("open");
+    e.currentTarget.setAttribute("aria-expanded", open ? "true" : "false");
   });
   // Search: autocomplete dropdown + live map filter
   const searchInput = document.getElementById("search");
   searchInput.addEventListener("input", e => {
     const v = e.target.value;
     activeFilters.search = v;
-    applyFilters();            // also filter the map dots
-    renderSearchResults(v);    // and show a dropdown of matches
+    // Debounce the heavy work: applyFilters scans up to ~311k features and
+    // re-indexes the MapLibre source, and renderSearchResults rescans them —
+    // running both per keystroke janks large countries. Coalesce a burst.
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(() => {
+      applyFilters();            // also filter the map dots
+      renderSearchResults(v);    // and show a dropdown of matches
+    }, 180);
   });
   searchInput.addEventListener("focus", e => {
     // Re-show last results on re-focus if input still has text
@@ -3391,6 +3513,23 @@ function updateHazardWeights() {
       ["coalesce", ["get", h.prop], 0],
       0, 0, projectedMax, 1,
     ]);
+    // Lowering the weight cap alone shows NOTHING for high-baseline
+    // countries: Nigeria's heat_index_days already exceed h.max, so every
+    // facility is pinned at weight 1.0 even in 2024 and the year chips
+    // looked identical. Also scale heatmap-intensity by the multiplier so
+    // already-saturated zones still visibly intensify as the years advance.
+    map.setPaintProperty(h.id, "heatmap-intensity", [
+      "interpolate", ["linear"], ["zoom"],
+      0, 0.4 * mult, 10, 1.4 * mult, 12, 2.0 * mult,
+    ]);
+    // Also grow the radius so the hazard zone visibly EXPANDS (not just
+    // brightens) as the years advance — makes the 2024→2030→2050 step
+    // read more clearly. Up to ~45% larger at 2050 heat (mult 1.75).
+    const rGrow = 1 + (mult - 1) * 0.6;
+    map.setPaintProperty(h.id, "heatmap-radius", [
+      "interpolate", ["linear"], ["zoom"],
+      0, 6 * rGrow, 8, 18 * rGrow, 14, h.radiusZ14 * rGrow,
+    ]);
   }
 }
 
@@ -3442,15 +3581,31 @@ function printSummary() {
     <table>
       <tr><th>#</th><th>Facility</th><th>Type</th><th>Score</th><th>Top Driver</th><th>Priority Action</th></tr>
       ${top10.map((f, i) => {
-        const p = f.properties;
-        const recs = typeof p.recommendations === "string" ? JSON.parse(p.recommendations) : (p.recommendations || []);
-        const drivers = typeof p.top_drivers === "string" ? JSON.parse(p.top_drivers) : (p.top_drivers || []);
+        const liteP = f.properties;
+        // Top Driver + Action live only on the FULL feature (lite drops them).
+        // switchCountry pre-fetches full in the background, so it's usually
+        // cached by now; fall back to a lite-derived driver if not.
+        const fIso = liteP._iso3 || (m && m.iso3) || _currentCountryIso;
+        const full = getFullFeature(fIso, liteP.id);
+        const p = full ? full.properties : liteP;
+        const recs = full ? (typeof p.recommendations === "string" ? JSON.parse(p.recommendations) : (p.recommendations || [])) : [];
+        const drivers = full ? (typeof p.top_drivers === "string" ? JSON.parse(p.top_drivers) : (p.top_drivers || [])) : [];
+        let topDriver = drivers[0] ? drivers[0].replace(/_/g, " ") : "";
+        if (!topDriver) {
+          const cand = [
+            ["heat exposure", liteP.heat_index_days || 0],
+            ["air pollution", liteP.pm25_avg_ugm3 || 0],
+            ["drought risk", liteP.longest_dry_run_days || 0],
+            ["flood risk", liteP.heavy_precip_days || 0],
+          ].sort((a, b) => b[1] - a[1]);
+          topDriver = cand[0][1] > 0 ? cand[0][0] : "";
+        }
         return `<tr>
           <td>${i + 1}</td>
           <td>${escapeHtml(displayName(f))}</td>
-          <td>${escapeHtml(p.facility_type)}</td>
-          <td><span class="badge ${band(p.risk_score)}">${p.risk_score}</span></td>
-          <td>${escapeHtml((drivers[0] || "").replace(/_/g, " "))}</td>
+          <td>${escapeHtml(liteP.facility_type)}</td>
+          <td><span class="badge ${band(liteP.risk_score)}">${liteP.risk_score}</span></td>
+          <td>${escapeHtml(topDriver)}</td>
           <td>${recs.length ? escapeHtml(recs[0].title) : "—"}</td>
         </tr>`;
       }).join("")}
