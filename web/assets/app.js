@@ -198,13 +198,20 @@ function flattenClimateAir(features) {
 // Re-build allFeatures from every cached country (in 3D mode). Used after
 // background country loads land so they get merged into the active view.
 function mergeAllCountriesIntoAllFeatures() {
-  const combined = [];
+  // Collect each country's tagged features as separate arrays, then flatten
+  // ONCE. The previous `combined.push(...features)` spread each country's
+  // feature array as function ARGUMENTS — and Nigeria alone (~159k features)
+  // blows past V8's argument-count limit, throwing "RangeError: Maximum call
+  // stack size exceeded" the moment a large country got merged in 3D (the
+  // 3D-only country-switch "stuck loading" bug). flat() iterates internally
+  // with no such limit.
+  const parts = [];
   for (const iso of ALL_ISOS) {
     const data = countryDataByIso[iso];
     if (!data) continue;
-    combined.push(...tagFeaturesIso(data.features || [], iso));
+    parts.push(tagFeaturesIso(data.features || [], iso));
   }
-  allFeatures = combined;
+  allFeatures = parts.flat();
 }
 
 // Paint expression for "1.0 for active, 0.3 for context" on a circle layer's
