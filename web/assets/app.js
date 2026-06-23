@@ -1296,6 +1296,7 @@ const PULSE_THRESHOLD = 73;       // risk_score threshold; raise to 75 post-reru
 const PULSE_PERIOD_SEC = 2.4;     // one full breath in/out
 let pulseRafId = null;
 let pulseEnabled = true;          // default ON; user can toggle via HUD chip
+let _pulseMoveHooked = false;     // movestart/moveend pause hooks added once
 
 // Public toggle — flips pulseEnabled, adds or removes the layer + animation
 // and updates the HUD button's text. Plain text 'ON' / 'OFF' inside the chip;
@@ -1329,6 +1330,17 @@ function setupPulseLayer() {
     },
   });
   startPulseAnimation();
+  // Pause the pulse while the camera is moving (country fly-to, user pan/zoom)
+  // so its per-frame full repaints don't compete with the movement — the main
+  // cause of country-switch lag. Resume once motion settles. Registered once
+  // for the map's lifetime.
+  if (!_pulseMoveHooked) {
+    _pulseMoveHooked = true;
+    map.on("movestart", stopPulseAnimation);
+    map.on("moveend", () => {
+      if (pulseEnabled && map.getLayer(PULSE_LAYER_ID)) startPulseAnimation();
+    });
+  }
 }
 
 function teardownPulseLayer() {
@@ -1339,13 +1351,24 @@ function teardownPulseLayer() {
 function startPulseAnimation() {
   if (pulseRafId !== null) return;
   const t0 = performance.now();
+  let lastDraw = 0;
   function frame() {
     if (!map.getLayer(PULSE_LAYER_ID)) { pulseRafId = null; return; }
-    const t = (performance.now() - t0) / 1000;
-    const phase = (Math.sin((t / PULSE_PERIOD_SEC) * Math.PI * 2) + 1) / 2; // 0..1
-    // Opacity fades out as the ring expands — the classic “radar ping” feel.
-    map.setPaintProperty(PULSE_LAYER_ID, "circle-stroke-opacity", 0.85 * (1 - phase * 0.9));
-    map.setPaintProperty(PULSE_LAYER_ID, "circle-stroke-width", 1.2 + phase * 5.5);
+    const now = performance.now();
+    // Throttle paint updates to ~20fps. Each setPaintProperty forces a FULL
+    // map repaint — re-culling/positioning the whole multi-country scene (up
+    // to 311k features on the 3D globe). At 60fps that pinned the main thread
+    // and made country switches janky; a 2.4s breath reads identically at
+    // 20fps. (The pulse also pauses entirely during camera movement — see the
+    // movestart/moveend hooks in setupPulseLayer.)
+    if (now - lastDraw >= 50) {
+      lastDraw = now;
+      const t = (now - t0) / 1000;
+      const phase = (Math.sin((t / PULSE_PERIOD_SEC) * Math.PI * 2) + 1) / 2; // 0..1
+      // Opacity fades out as the ring expands — the classic “radar ping” feel.
+      map.setPaintProperty(PULSE_LAYER_ID, "circle-stroke-opacity", 0.85 * (1 - phase * 0.9));
+      map.setPaintProperty(PULSE_LAYER_ID, "circle-stroke-width", 1.2 + phase * 5.5);
+    }
     pulseRafId = requestAnimationFrame(frame);
   }
   pulseRafId = requestAnimationFrame(frame);
@@ -1398,15 +1421,27 @@ const STATE_FIXES = {
   GTM: {},
 };
 
+const _stateNameCache = new Map();
 function normalizeStateName(raw, iso3) {
   if (!raw || raw === "Untagged Region") return "Untagged Region";
-  // Apply known fixes
+  // Memoize: getState calls this once PER FEATURE, so a country switch ran it
+  // across the whole feature set. There are only dozens of distinct
+  // (iso3, raw) state strings, so caching collapses 10^5 calls to a handful
+  // of real regex runs.
+  const key = iso3 + "|" + raw;
+  const hit = _stateNameCache.get(key);
+  if (hit !== undefined) return hit;
   const fixes = STATE_FIXES[iso3] || {};
-  if (fixes[raw]) return fixes[raw];
-  // Title case: "adamawa" -> "Adamawa", "yobe" -> "Yobe"
-  const titled = raw.replace(/\b\w/g, c => c.toUpperCase())
-                     .replace(/\bState\b/i, "").trim(); // remove trailing "State"
-  return titled;
+  let result;
+  if (fixes[raw]) {
+    result = fixes[raw];
+  } else {
+    // Title case: "adamawa" -> "Adamawa", "yobe" -> "Yobe"
+    result = raw.replace(/\b\w/g, c => c.toUpperCase())
+                .replace(/\bState\b/i, "").trim(); // remove trailing "State"
+  }
+  _stateNameCache.set(key, result);
+  return result;
 }
 
 function getState(feature) {
@@ -3091,7 +3126,12 @@ async function switchCountry(iso3) {
   }
 
   // --- 3. RE-RENDER with real data ---------------------------------------
-  populateStates(allFeatures);
+  // Scope to the ACTIVE country's features only. In 3D, allFeatures is the
+  // merged ~311k across all five countries, but the state dropdown only needs
+  // the active country — iterating the full merge here (getState per feature)
+  // was a chunk of the country-switch jank. `data` is the active country just
+  // loaded above.
+  populateStates(data.features || []);
   updateSearchPlaceholder();
   applyFilters();
 
