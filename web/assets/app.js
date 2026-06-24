@@ -1967,7 +1967,9 @@ function updateMap() {
       ],
       "circle-blur": 1.1,
     },
-  }, "facilities-glow");
+  });  // no beforeId: the dots are a deck.gl overlay on top of all MapLibre
+       // layers now, so the aura renders below them regardless. (The old
+       // beforeId "facilities-glow" threw once that circle layer was removed.)
   // Initial population for the very first load — subsequent country switches
   // hit the updateMap early-return branch which calls setCountryAura there.
   setCountryAura(_currentCountryIso);
@@ -3607,7 +3609,8 @@ function ensureHazardLayers() {
           "interpolate", ["linear"], ["zoom"], 0, 0.85, 12, 0.55,
         ],
       },
-    }, "facilities-glow");
+    });  // no beforeId — facilities-glow circle layer no longer exists (deck
+         // renders the dots now; in heatmap mode the deck dots are hidden).
   }
 }
 
