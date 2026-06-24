@@ -466,11 +466,14 @@ map.addControl(new maplibregl.NavigationControl({ visualizePitch: IS_3D }), "top
 // ScatterplotLayer (via MapboxOverlay) so they stay visible AND smooth
 // during the 3D globe fly — MapLibre repainted every circle each frame under
 // a moving camera, dropping the framerate (we used to hide the dots during
-// the fly to compensate). interleaved:true renders the dots inside MapLibre's
-// GL context so they respect the globe's depth. The "facilities" SOURCE is
-// still kept (heatmap + pulse read from it); only the heavy circle LAYERS
-// are gone.
-const deckOverlay = new deck.MapboxOverlay({ interleaved: true, layers: [] });
+// the fly to compensate). Use OVERLAID mode (interleaved:false): deck draws in
+// its own canvas synced to the map camera — the battle-tested mode for the
+// MapLibre globe that redraws reliably during the fly. (interleaved:true
+// blanked the dots during the globe fly-animation.) Trade-off: far-side dots
+// aren't occluded by the sphere; revisit if that reads wrong. The "facilities"
+// SOURCE is still kept (heatmap + pulse read from it); only the heavy circle
+// LAYERS are gone.
+const deckOverlay = new deck.MapboxOverlay({ interleaved: false, layers: [] });
 map.addControl(deckOverlay);
 
 const BAND_RGBA = {
