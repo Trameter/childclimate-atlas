@@ -12,7 +12,7 @@ An open-source pipeline that turns open climate, air-quality, and geospatial dat
 
 The Atlas is running at **[climate-atlas.trameter.com](http://climate-atlas.trameter.com/)** — no install required. Switch between Nigeria, Bangladesh, Guatemala, Kenya, and the Philippines; filter by state, facility type, or risk band; click any clinic or school to see its risk breakdown and recommended actions.
 
-### Three views, same data
+### Two views, same data
 
 **[Working dashboard → climate-atlas.trameter.com](http://climate-atlas.trameter.com/)** — data-dense 2D map for ministries, researchers, and journalists.
 
@@ -22,9 +22,7 @@ The Atlas is running at **[climate-atlas.trameter.com](http://climate-atlas.tram
 
 [![3D immersive view — ChildClimate Risk Atlas](./docs/atlas-3d-screenshot.jpg)](http://climate-atlas.trameter.com/3d)
 
-**[VR → climate-atlas.trameter.com/vr](http://climate-atlas.trameter.com/vr)** — WebXR tabletop globe with controller-driven interaction, spatial audio, and AR hit-test. Works in a Quest browser or via the Immersive Web Emulator Chrome extension.
-
-<sub>311,669 schools and clinics across Nigeria, Bangladesh, Guatemala, Kenya, and the Philippines. Click any dot in any view to open its risk breakdown and recommended actions. Toggle between views from the top-right at any time — filters and selection are preserved.</sub>
+<sub>311,669 schools and clinics across Nigeria, Bangladesh, Guatemala, Kenya, and the Philippines. Click any dot in either view to open its risk breakdown and recommended actions. Toggle between views from the top-right at any time — filters and selection are preserved.</sub>
 
 ---
 
