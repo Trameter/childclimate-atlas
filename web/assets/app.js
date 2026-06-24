@@ -263,7 +263,7 @@ const inflight = new Map();
 // metadata or properties) — separate from the asset bust on CSS/JS in
 // the HTML so we don't have to re-deploy the JS bundle just because a
 // nightly data refresh ran.
-const DATA_VERSION = "1779890402";
+const DATA_VERSION = "1782950400";
 
 // Ballpark uncompressed sizes (used only when the server sends a compressed
 // Content-Length, which reports the COMPRESSED byte count and would make
@@ -2410,6 +2410,25 @@ function renderDetail(feature) {
       <span class="p">${v}</span>
     </div>`).join("");
 
+  // Area electrification (HREA night-lights, settlement-level). The field
+  // rides in the LITE tier only, so when the panel has upgraded to the full
+  // feature (which doesn't carry it) we look it up by id from the lite data
+  // so the line doesn't vanish after the full-data re-render. Null when the
+  // country has no HREA coverage — block omitted entirely in that case.
+  const _aeIso = p._iso3 || _currentCountryIso;
+  let _ae = p.area_electrification;
+  if (_ae == null) {
+    const _liteSrc = (countryDataByIso[_aeIso] && countryDataByIso[_aeIso].features)
+      || (currentData && currentData.features) || [];
+    const _lf = _liteSrc.find(ff => ff.properties.id === p.id);
+    if (_lf) _ae = _lf.properties.area_electrification;
+  }
+  const electrificationHtml = (_ae == null) ? "" : `
+    <div class="detail-section">
+      <h4>Area electrification · ${_ae >= 0.66 ? "Likely" : _ae >= 0.33 ? "Partly" : "Unlikely"}</h4>
+      <p class="section-note">Settlement-level estimate (HREA night-lights). Reflects the area's grid coverage, not whether this school itself is wired.</p>
+    </div>`;
+
   // Recommendations — reordered to mirror the Top-drivers list so the user
   // reads top driver → top recommendation, second driver → second rec, etc.
   // Recs without a corresponding driver (e.g. fragility) keep their
@@ -2514,6 +2533,8 @@ function renderDetail(feature) {
       <h4>Raw inputs</h4>
       ${inputsHtml}
     </div>
+
+    ${electrificationHtml}
 
     ${hasFull ? `
     <div class="detail-section">
