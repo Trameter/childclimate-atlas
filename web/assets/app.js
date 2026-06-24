@@ -461,6 +461,95 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: IS_3D }), "top-right");
 
+// ---- deck.gl facility dot field (GPU-instanced) -------------------------
+// The ~311k facility dots moved off MapLibre circle layers onto a deck.gl
+// ScatterplotLayer (via MapboxOverlay) so they stay visible AND smooth
+// during the 3D globe fly — MapLibre repainted every circle each frame under
+// a moving camera, dropping the framerate (we used to hide the dots during
+// the fly to compensate). interleaved:true renders the dots inside MapLibre's
+// GL context so they respect the globe's depth. The "facilities" SOURCE is
+// still kept (heatmap + pulse read from it); only the heavy circle LAYERS
+// are gone.
+const deckOverlay = new deck.MapboxOverlay({ interleaved: true, layers: [] });
+map.addControl(deckOverlay);
+
+const BAND_RGBA = {
+  low:    [111, 167, 116],  // #6FA774
+  mid:    [217, 182, 83],   // #D9B653
+  high:   [217, 137, 79],   // #D9894F
+  severe: [195, 82, 72],    // #C35248
+};
+// 3D multi-country: dim non-active countries to ~30% alpha (matches the old
+// applyActiveCountryOpacity behavior the MapLibre dot layers had).
+function dotFillColor(f, activeIso) {
+  const c = BAND_RGBA[band(f.properties.risk_score)];
+  const dim = IS_3D && activeIso && f.properties._iso3 && f.properties._iso3 !== activeIso;
+  return [c[0], c[1], c[2], dim ? 77 : 255];
+}
+function buildFacilityDeckLayers() {
+  const activeIso = _currentCountryIso;
+  const data = filteredFeatures;
+  const getPos = f => f.geometry.coordinates;
+  return [
+    new deck.ScatterplotLayer({
+      id: "facility-glow",
+      data,
+      getPosition: getPos,
+      getFillColor: f => {
+        const c = BAND_RGBA[band(f.properties.risk_score)];
+        const dim = IS_3D && activeIso && f.properties._iso3 && f.properties._iso3 !== activeIso;
+        return [c[0], c[1], c[2], dim ? 26 : 82];
+      },
+      getRadius: 7,
+      radiusUnits: "pixels",
+      radiusMinPixels: 3,
+      stroked: false,
+      pickable: false,
+      updateTriggers: { getFillColor: [activeIso] },
+    }),
+    new deck.ScatterplotLayer({
+      id: "facility-dots",
+      data,
+      getPosition: getPos,
+      getFillColor: f => dotFillColor(f, activeIso),
+      getRadius: 3.5,
+      radiusUnits: "pixels",
+      radiusMinPixels: 2,
+      stroked: true,
+      getLineColor: [30, 36, 51, 217],   // var(--ink) ~85%
+      lineWidthUnits: "pixels",
+      getLineWidth: 1,
+      pickable: true,
+      onClick: (info) => {
+        if (info && info.object) { highlightFacility(info.object); renderDetail(info.object); }
+      },
+      onHover: (info) => setHoveredFacility(info && info.object ? info.object : null),
+      updateTriggers: { getFillColor: [activeIso] },
+    }),
+  ];
+}
+// Push the current filtered features into the deck overlay. Called from
+// updateMap (both first-time and subsequent paths) and on heatmap toggle.
+// Heatmap mode renders the hazard heatmap INSTEAD of the dots, so feed []
+// then. Cheap: deck diffs + re-uploads GPU-side, not a per-frame cost.
+function renderDeckDots() {
+  if (typeof deckOverlay === "undefined" || !deckOverlay) return;
+  deckOverlay.setProps({ layers: heatmapVisible ? [] : buildFacilityDeckLayers() });
+}
+// Feed the MapLibre "hovered" source (drives the hovered-halo ring) from
+// deck's onHover. Kept on MapLibre because the halo is a single feature.
+function setHoveredFacility(f) {
+  const src = map.getSource("hovered");
+  if (src) {
+    src.setData({
+      type: "FeatureCollection",
+      features: f ? [{ type: "Feature", geometry: f.geometry, properties: { risk_score: f.properties.risk_score } }] : [],
+    });
+  }
+  const cv = map.getCanvas();
+  if (cv) cv.style.cursor = f ? "pointer" : "";
+}
+
 // Cinematic camera helper. 2D path falls straight through to map.flyTo so
 // the working tool stays predictable. 3D path adds pitch + bearing so the
 // camera arcs across the globe + dives into the target facility, which is
@@ -1775,6 +1864,8 @@ function updateMap() {
     setCountryAura(_currentCountryIso);
     // Multi-country: keep paint opacity in sync with the active country.
     applyActiveCountryOpacity(_currentCountryIso);
+    // Refresh the deck.gl dot field (new filtered set / active-country tint).
+    renderDeckDots();
     return;
   }
 
@@ -1791,23 +1882,12 @@ function updateMap() {
   // replaces it with a case-expression so non-active countries dim to 30%
   // in 3D mode. In 2D mode allActiveCountryOpacity is a no-op and the
   // base values stick.
-  map.addLayer({
-    id: "facilities-glow", type: "circle", source: "facilities",
-    paint: {
-      "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 6, 10, 12, 14, 18],
-      "circle-color": RISK_STOPS,
-      "circle-blur": 0.8, "circle-opacity": 0.32,
-    },
-  });
-  map.addLayer({
-    id: "facilities", type: "circle", source: "facilities",
-    paint: {
-      "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 3, 10, 6, 14, 10],
-      "circle-color": RISK_STOPS,
-      "circle-stroke-color": "rgba(30,36,51,0.85)",  // var(--ink) at 85%
-      "circle-stroke-width": 1.2,
-    },
-  });
+  // The facility dot field (glow + dots) is rendered by deck.gl now — a
+  // GPU-instanced ScatterplotLayer set up after map init (renderDeckDots /
+  // the MapboxOverlay), so it stays smooth during the globe fly. The
+  // "facilities" SOURCE above is kept because the heatmap + pulse layers
+  // still read from it; only the two heavy circle layers were removed.
+  renderDeckDots();
 
   // 3D-only: pulse ring around the top-critical facilities so the eye is
   // drawn to the worst from anywhere on the globe. Setup-once here; the
@@ -3543,6 +3623,7 @@ function toggleHeatmap() {
       if (map.getLayer(h.id)) map.setLayoutProperty(h.id, "visibility", "visible");
     }
     setFacilityLayersVisible(false);
+    renderDeckDots();  // hide the deck dot field too (heatmap renders instead)
     btn?.classList.add("active");
     if (hud) hud.textContent = `Hazards · on (${currentProjectionYear === 2024 ? "Today" : currentProjectionYear})`;
     if (btn) btn.textContent = "Hide hazards";
@@ -3551,6 +3632,7 @@ function toggleHeatmap() {
       if (map.getLayer(h.id)) map.setLayoutProperty(h.id, "visibility", "none");
     }
     setFacilityLayersVisible(true);
+    renderDeckDots();  // bring the deck dot field back
     btn?.classList.remove("active");
     if (hud) hud.textContent = "Hazards · off";
     if (btn) btn.textContent = "Hazards";
