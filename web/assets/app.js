@@ -3083,10 +3083,6 @@ async function switchCountry(iso3) {
     // should start where the camera ACTUALLY is so it tracks the flight.
     const c = map.getCenter();
     showCountryTrail([c.lng, c.lat], v.center);
-    // Hide the dot field during the fly so the camera + trail arc aren't
-    // re-rendering ~311k circles every frame (the residual line lag). The
-    // dots snap back when the camera lands (moveend handler below).
-    if (!heatmapVisible) setFacilityLayersVisible(false);
   }
   _prevCountryCenter = v.center;
 
@@ -3139,20 +3135,12 @@ async function switchCountry(iso3) {
   updateSearchPlaceholder();
   applyFilters();
 
-  // Ensure the facility layers are visible after a country switch (unless
-  // heatmap mode is on, which intentionally hides them). For a country-to-
-  // country fly, the dots were hidden above for smoothness — restore them
-  // when the camera LANDS (moveend) rather than now, so they never re-render
-  // under a moving camera. moveend fires when the flyTo finishes or the user
-  // interrupts it. Other paths (initial load, same-country, 2D) restore now.
+  // Defensive: ensure the facility layers are visible after a country
+  // switch. If the user had heatmap on while on the previous country
+  // (which hides the dot layers), or any other path left layers hidden,
+  // this restores them so the new country actually shows its dots.
   if (!heatmapVisible) {
-    if (willAnimateTrail) {
-      map.once("moveend", () => {
-        if (!heatmapVisible) setFacilityLayersVisible(true);
-      });
-    } else {
-      setFacilityLayersVisible(true);
-    }
+    setFacilityLayersVisible(true);
   }
 
   // Data + map source are now populated. Flip the ready flag, hide the
