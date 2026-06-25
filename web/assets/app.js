@@ -263,7 +263,7 @@ const inflight = new Map();
 // metadata or properties) — separate from the asset bust on CSS/JS in
 // the HTML so we don't have to re-deploy the JS bundle just because a
 // nightly data refresh ran.
-const DATA_VERSION = "1782950400";
+const DATA_VERSION = "1783060000";
 
 // Ballpark uncompressed sizes (used only when the server sends a compressed
 // Content-Length, which reports the COMPRESSED byte count and would make
