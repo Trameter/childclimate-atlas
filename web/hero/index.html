@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0A0E18" />
+  <meta name="robots" content="noindex" />
+  <title>Nigeria · ChildClimate Atlas (hero prototype)</title>
+  <style>
+    html, body { margin:0; height:100%; background:#0A0E18; color:#E8EAF0;
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; overflow:hidden; }
+    #c { display:block; width:100vw; height:100vh; }
+    .overlay { position:fixed; left:34px; top:32px; pointer-events:none; }
+    .eyebrow { font-family: ui-monospace, monospace; font-size:10px; letter-spacing:.25em;
+      text-transform:uppercase; color:#7F889D; }
+    h1 { margin:.42em 0 .28em; font-size:36px; font-weight:600; letter-spacing:-0.015em; }
+    h1 em { font-style:normal; color:#D87B4F; }
+    .sub { font-size:13px; color:#A2AABC; max-width:32ch; line-height:1.55; }
+    .legend { position:fixed; left:34px; bottom:30px; display:flex; gap:16px;
+      font-family:ui-monospace,monospace; font-size:10px; color:#7F889D; letter-spacing:.06em; }
+    .legend i { display:inline-block; width:8px; height:8px; border-radius:50%;
+      margin-right:6px; vertical-align:middle; }
+    .loading { position:fixed; inset:0; display:grid; place-items:center;
+      font-family:ui-monospace,monospace; font-size:11px; letter-spacing:.22em;
+      text-transform:uppercase; color:#7F889D; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <div class="overlay">
+    <div class="eyebrow">Trameter · ChildClimate Atlas</div>
+    <h1>Nigeria. <em>159,004 schools.</em></h1>
+    <div class="sub">Every school scored 0–100 for climate risk. Each dot is one of them.</div>
+  </div>
+
+  <div class="legend">
+    <span><i style="background:#D9B653"></i>Moderate</span>
+    <span><i style="background:#D9894F"></i>High</span>
+    <span><i style="background:#C35248"></i>Severe</span>
+  </div>
+
+  <div class="loading" id="loading">Loading…</div>
+
+  <script src="../assets/vendor/three@0.149.0/three.min.js"></script>
+  <script src="./hero.js?v=1"></script>
+</body>
+</html>
