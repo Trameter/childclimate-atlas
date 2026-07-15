@@ -135,10 +135,12 @@
     var dg = new THREE.BufferGeometry();
     dg.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     dg.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    // Normal blending, deliberately NOT additive: additive stacks RGB wherever
+    // dots overlap, so the dense clusters saturate to pure white and the risk
+    // colour (the entire point of the image) is lost. Normal keeps every dot
+    // its own band colour, and the clusters read as a solid mass of it.
     map.add(new THREE.Points(dg, new THREE.PointsMaterial({
-      size: 0.028, vertexColors: true, sizeAttenuation: true,
-      transparent: true, opacity: 0.95,
-      blending: THREE.AdditiveBlending, depthWrite: false,
+      size: 0.03, vertexColors: true, sizeAttenuation: true,
     })));
 
     if (loadingEl) loadingEl.remove();
