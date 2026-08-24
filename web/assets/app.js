@@ -805,14 +805,22 @@ function hideMapLoadingWhenRendered() {
 const PREVIEW_SRC = "facilities-preview";
 let _previewShowing = false;
 
-// Polls rather than listening for "load": this runs early by design (possibly
-// before the style is ready) but also on later country switches, when a
-// `once("load")` listener would never fire. Capped so a broken style can't
-// spin forever.
+// Attempt-and-retry rather than gating on a readiness flag.
+//
+// map.isStyleLoaded() is NOT usable here: with a 159k-feature GeoJSON source
+// re-indexing, it keeps reporting false for tens of seconds after the style is
+// perfectly able to accept addSource/addLayer. Gating on it meant the preview
+// silently gave up and never painted at all. Listening for "style.load" is no
+// good either, since on a country switch it has already fired.
+//
+// So: just try, and retry if MapLibre rejects it. `fn` must be idempotent.
 function _whenStyleReady(fn, attempt = 0) {
-  if (map.isStyleLoaded()) { fn(); return; }
-  if (attempt > 50) return;
-  setTimeout(() => _whenStyleReady(fn, attempt + 1), 120);
+  try {
+    fn();
+  } catch (e) {
+    if (attempt > 80) return;   // ~8s, well past any real style load
+    setTimeout(() => _whenStyleReady(fn, attempt + 1), 100);
+  }
 }
 
 async function paintPreviewDots(iso3) {
@@ -839,13 +847,15 @@ async function paintPreviewDots(iso3) {
     }
     const data = { type: "FeatureCollection", features };
 
+    // Every step is guarded so the whole block is safe to re-run after a
+    // partial failure (see _whenStyleReady).
     _whenStyleReady(() => {
       if (dataReady) return;
       const existing = map.getSource(PREVIEW_SRC);
-      if (existing) { existing.setData(data); _previewShowing = true; return; }
-      map.addSource(PREVIEW_SRC, { type: "geojson", data });
+      if (existing) existing.setData(data);
+      else map.addSource(PREVIEW_SRC, { type: "geojson", data });
       // Same paint as the real layers so the swap is invisible.
-      map.addLayer({
+      if (!map.getLayer("facilities-preview-glow")) map.addLayer({
         id: "facilities-preview-glow", type: "circle", source: PREVIEW_SRC,
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 6, 10, 12, 14, 18],
@@ -853,7 +863,7 @@ async function paintPreviewDots(iso3) {
           "circle-blur": 0.8, "circle-opacity": 0.32,
         },
       });
-      map.addLayer({
+      if (!map.getLayer("facilities-preview-dot")) map.addLayer({
         id: "facilities-preview-dot", type: "circle", source: PREVIEW_SRC,
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 3, 10, 6, 14, 10],
