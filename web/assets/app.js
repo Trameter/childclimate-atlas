@@ -461,6 +461,21 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: IS_3D }), "top-right");
 
+// True once the style SPEC has parsed, which is all addSource/addLayer
+// actually require.
+//
+// This exists because map.isStyleLoaded() is a much stronger condition: it
+// also waits for every source to finish loading, and with a 159k-feature
+// GeoJSON source indexing it was observed still reporting false 60+ seconds
+// into a page load. updateMap() used it as a hard gate, so the dots sat
+// blocked long after the data was parsed and ready — the real cause of the
+// long blank map, which was never the download or the parse.
+//
+// Nothing calls setStyle(), so the spec loads exactly once and this never
+// needs resetting. (setProjection() for the 2D/3D toggle does not reload it.)
+let _styleSpecLoaded = false;
+map.on("style.load", () => { _styleSpecLoaded = true; });
+
 // Cinematic camera helper. 2D path falls straight through to map.flyTo so
 // the working tool stays predictable. 3D path adds pitch + bearing so the
 // camera arcs across the globe + dives into the target facility, which is
@@ -1867,7 +1882,10 @@ function updateMap() {
   // is locked out forever. Belt-and-braces: also schedule a setTimeout
   // fallback. Whichever fires first wins; the mapUpdateQueued flag prevents
   // the loser from double-running.
-  if (!map.isStyleLoaded()) {
+  // Gate on the style SPEC, not isStyleLoaded() — see _styleSpecLoaded. The
+  // isStyleLoaded() check is kept as a fallback for the case where style.load
+  // fired before this listener was attached.
+  if (!_styleSpecLoaded && !map.isStyleLoaded()) {
     if (!mapUpdateQueued) {
       mapUpdateQueued = true;
       const retry = () => {
