@@ -828,9 +828,11 @@ async function paintPreviewDots(iso3) {
     const r = await fetch(`/data/${iso3}.dots.bin?v=${DATA_VERSION}`);
     if (!r.ok) return;                 // no preview built for this country
     const buf = await r.arrayBuffer();
-    // The real data won the race (cache hit, or a fast switch back to an
-    // already-loaded country) — painting now would be a pointless flicker.
-    if (dataReady) return;
+    // Skip only if the real dots are ALREADY DRAWN. Deliberately not keyed on
+    // dataReady: the data often finishes loading well before the style will
+    // accept layers, so bailing on dataReady left the map blank for exactly
+    // the window this exists to cover.
+    if (map.getLayer("facilities")) return;
 
     const n = new DataView(buf).getUint32(0, true);
     const lons = new Float32Array(buf, 4, n);
@@ -850,7 +852,7 @@ async function paintPreviewDots(iso3) {
     // Every step is guarded so the whole block is safe to re-run after a
     // partial failure (see _whenStyleReady).
     _whenStyleReady(() => {
-      if (dataReady) return;
+      if (map.getLayer("facilities")) return;
       const existing = map.getSource(PREVIEW_SRC);
       if (existing) existing.setData(data);
       else map.addSource(PREVIEW_SRC, { type: "geojson", data });
@@ -885,8 +887,16 @@ async function paintPreviewDots(iso3) {
 // Removed only once the real dots have actually painted (waiting for `idle`
 // rather than firing straight after setData), so there's no frame where the
 // map is empty between the two.
-function clearPreviewDots() {
+function clearPreviewDots(attempt = 0) {
   if (!_previewShowing) return;
+  // Don't retire the stand-in until the real layer actually exists. updateMap()
+  // gates on isStyleLoaded() and can lag well behind dataReady, so removing on
+  // the dataReady signal alone would reopen the very gap this closes.
+  if (!map.getLayer("facilities")) {
+    if (attempt > 200) return;               // ~30s, then give up quietly
+    setTimeout(() => clearPreviewDots(attempt + 1), 150);
+    return;
+  }
   _previewShowing = false;
   const go = () => {
     try {
