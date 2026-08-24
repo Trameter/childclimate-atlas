@@ -892,6 +892,11 @@ async function paintPreviewDots(iso3) {
       _previewShowing = true;
       // Dots are on screen, so the "Loading…" badge is now a lie.
       hideMapLoading();
+      // Arm retirement from HERE, not only from the switchCountry call site:
+      // that call usually lands before this paint has happened, sees
+      // _previewShowing still false, and no-ops — leaving the stand-in on the
+      // map (and its source in memory) forever.
+      clearPreviewDots();
     });
   } catch (e) {
     // Best-effort only — a failed preview must never block the real load.
