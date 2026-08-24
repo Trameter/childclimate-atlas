@@ -785,6 +785,110 @@ function hideMapLoadingWhenRendered() {
   setTimeout(finish, 4000);
 }
 
+/* ---- Fast-paint dot preview --------------------------------------------
+ *
+ * The real dot layer can't paint until the active country's lite GeoJSON has
+ * downloaded AND parsed. Measured cold on the live site that was ~29s for
+ * Nigeria (~6 MB gzipped, ~50 MB of JSON), and for nearly all of it the map
+ * reads as broken rather than busy.
+ *
+ * First paint only needs lon, lat and risk_score (dot colour is a `step` on
+ * risk_score). Packed as a binary that's 9 bytes per facility with no parse
+ * step, Nigeria is ~1.4 MB and decodes instantly. Built by
+ * scripts/make_dot_previews.py.
+ *
+ * Deliberately a THROWAWAY layer with its own id: preview dots carry no ids,
+ * names or filterable properties, and the click/hover handlers bind to the
+ * "facilities" layer — so a preview dot can never be picked and open a detail
+ * panel for a facility we know nothing about.
+ */
+const PREVIEW_SRC = "facilities-preview";
+let _previewShowing = false;
+
+// Polls rather than listening for "load": this runs early by design (possibly
+// before the style is ready) but also on later country switches, when a
+// `once("load")` listener would never fire. Capped so a broken style can't
+// spin forever.
+function _whenStyleReady(fn, attempt = 0) {
+  if (map.isStyleLoaded()) { fn(); return; }
+  if (attempt > 50) return;
+  setTimeout(() => _whenStyleReady(fn, attempt + 1), 120);
+}
+
+async function paintPreviewDots(iso3) {
+  try {
+    const r = await fetch(`/data/${iso3}.dots.bin?v=${DATA_VERSION}`);
+    if (!r.ok) return;                 // no preview built for this country
+    const buf = await r.arrayBuffer();
+    // The real data won the race (cache hit, or a fast switch back to an
+    // already-loaded country) — painting now would be a pointless flicker.
+    if (dataReady) return;
+
+    const n = new DataView(buf).getUint32(0, true);
+    const lons = new Float32Array(buf, 4, n);
+    const lats = new Float32Array(buf, 4 + n * 4, n);
+    const scores = new Uint8Array(buf, 4 + n * 8, n);
+
+    const features = new Array(n);
+    for (let i = 0; i < n; i++) {
+      features[i] = {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [lons[i], lats[i]] },
+        properties: { risk_score: scores[i] },
+      };
+    }
+    const data = { type: "FeatureCollection", features };
+
+    _whenStyleReady(() => {
+      if (dataReady) return;
+      const existing = map.getSource(PREVIEW_SRC);
+      if (existing) { existing.setData(data); _previewShowing = true; return; }
+      map.addSource(PREVIEW_SRC, { type: "geojson", data });
+      // Same paint as the real layers so the swap is invisible.
+      map.addLayer({
+        id: "facilities-preview-glow", type: "circle", source: PREVIEW_SRC,
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 6, 10, 12, 14, 18],
+          "circle-color": RISK_STOPS,
+          "circle-blur": 0.8, "circle-opacity": 0.32,
+        },
+      });
+      map.addLayer({
+        id: "facilities-preview-dot", type: "circle", source: PREVIEW_SRC,
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 3, 10, 6, 14, 10],
+          "circle-color": RISK_STOPS,
+          "circle-stroke-color": "rgba(30,36,51,0.85)",
+          "circle-stroke-width": 1.2,
+        },
+      });
+      _previewShowing = true;
+      // Dots are on screen, so the "Loading…" badge is now a lie.
+      hideMapLoading();
+    });
+  } catch (e) {
+    // Best-effort only — a failed preview must never block the real load.
+    console.warn("[atlas] dot preview skipped:", e);
+  }
+}
+
+// Removed only once the real dots have actually painted (waiting for `idle`
+// rather than firing straight after setData), so there's no frame where the
+// map is empty between the two.
+function clearPreviewDots() {
+  if (!_previewShowing) return;
+  _previewShowing = false;
+  const go = () => {
+    try {
+      if (map.getLayer("facilities-preview-dot")) map.removeLayer("facilities-preview-dot");
+      if (map.getLayer("facilities-preview-glow")) map.removeLayer("facilities-preview-glow");
+      if (map.getSource(PREVIEW_SRC)) map.removeSource(PREVIEW_SRC);
+    } catch (e) { /* a style swap raced us; nothing left to clean up */ }
+  };
+  map.once("idle", go);
+  setTimeout(go, 3000);
+}
+
 function buildSpotlightQueue() {
   // Pull from the CURRENT filtered set so the spotlight always reflects
   // whatever the user is looking at (country switch, state filter, etc.).
@@ -1724,6 +1828,16 @@ let mapUpdateQueued = false;
 // updateMap() for the sig format.
 let _lastSetDataSig = null;
 
+// Risk-band colour stops shared by the facility layers (glow, dot, selection
+// ring) AND by the fast-paint preview below. Module-scope precisely so the
+// preview cannot drift from the real dots — if the two disagreed, the map
+// would visibly change colour at the instant of the swap.
+const RISK_STOPS = ["step", ["get", "risk_score"],
+  "#6FA774",  // low
+  30, "#D9B653",  // moderate
+  55, "#D9894F",  // high
+  75, "#C35248"]; // severe
+
 function updateMap() {
   const geojson = { type: "FeatureCollection", features: filteredFeatures };
 
@@ -1778,12 +1892,7 @@ function updateMap() {
     return;
   }
 
-  // Risk-band colour stops shared by all three layers (glow, dot, selection ring)
-  const RISK_STOPS = ["step", ["get", "risk_score"],
-    "#6FA774",  // low
-    30, "#D9B653",  // moderate
-    55, "#D9894F",  // high
-    75, "#C35248"]; // severe
+  // RISK_STOPS is module-scope now (shared with the fast-paint preview).
 
   map.addSource("facilities", { type: "geojson", data: geojson });
   // Note on opacity below: each layer paints with a static base value, but
@@ -3041,6 +3150,10 @@ async function switchCountry(iso3) {
   dataReady = false;
   pendingSpotlightStart = false;
   showMapLoading();
+  // Fire-and-forget so it races the big GeoJSON fetch below and wins: dots
+  // appear in a couple of seconds instead of ~29. Cleared once the real
+  // layer paints (see clearPreviewDots after dataReady flips).
+  paintPreviewDots(iso3);
   // URL mirrors the country switch immediately, even before data loads.
   // State is cleared because the new country has its own state set.
   setUrlParam("country", iso3);
@@ -3172,6 +3285,8 @@ async function switchCountry(iso3) {
   // Hide the overlay only once the map has actually painted the dots,
   // not the moment dataReady flips. Prevents the brief empty-map flash.
   hideMapLoadingWhenRendered();
+  // Real dots are committed; retire the stand-in (waits for idle internally).
+  clearPreviewDots();
 
   // If the landing URL specified a state, apply it now that the state
   // panel has been populated (populateStates above). Programmatic click
